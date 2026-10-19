@@ -36,7 +36,7 @@
       },
       "input": "stdin",
       "parser": "claude-stream-json",
-      "role": "설계자·비평가: 설계의 타당성, 예외 상황, 정확성, 장기 유지보수성을 따진다.",
+      "role": "균형 잡힌 중재자: 기술적 디테일과 큰 그림 사이 한가운데에 서서, Codex의 엄밀함과 Gemini의 통찰을 서로의 언어로 옮기고 실용적인 결론으로 묶는다.",
       "modelArgs": [
         "--model",
         "{model}"
@@ -155,7 +155,7 @@
       "input": "stdin",
       "parser": "text",
       "finalFrom": "lastMessageFile",
-      "role": "엄격한 코드 리뷰어: 정확성, 테스트, 성능, 보안을 보고 직접 코드를 실행해 주장을 검증한다.",
+      "role": "집요한 기술 장인: 말을 문자 그대로 받아들이고 돌려 말하지 않는다. 사실, 규칙, 엣지 케이스, 정확성·테스트·성능·보안에만 몰두하며 모든 주장을 직접 코드를 실행해 검증한다. 분위기나 체면보다 틀린 것을 틀렸다고 말하는 것이 우선이다.",
       "modelArgs": [
         "-m",
         "{model}"
@@ -208,7 +208,7 @@
       "input": "agy-json",
       "parser": "agy-stream-json",
       "readNote": "Note: in this turn shell commands are blocked, and trying one ends your turn with no answer. Use only file viewing and search tools, then write your answer.",
-      "role": "반대 측 논객·리서처: 전제를 의심하고 대안과 선행 사례, 외부 지식을 가져온다.",
+      "role": "통찰력 있는 현인: 기술 세부보다 세상과 사람, 역사와 맥락을 넓게 이해한다. '왜 하는가', '실제 사람들에게 무슨 의미인가'를 묻고, 다른 분야의 선행 사례와 비유로 모두가 놓친 큰 그림과 숨은 전제를 짚는다.",
       "modelArgs": [
         "--model",
         "{model}"

@@ -149,6 +149,8 @@ async function select(id) {
 function renderAgents() {
   const box = $('#agentsBox');
   const saved = load('agents.' + MODE) || {};
+  // Before rolesV 2 every persona was saved, defaults included; drop those so new defaults show.
+  if (load('rolesV') !== 2) for (const a of Object.values(saved)) if (a) delete a.role;
   box.innerHTML = '';
   for (const [id, a] of Object.entries(CFG.agents)) {
     const st = CHECK[id];
@@ -281,7 +283,11 @@ function saveForm() {
   for (const c of CHECKS) save(c, $('#' + c).checked);
   save(`moderator.${MODE}`, $('#moderator').value);
   if (MODE === 'develop') save('worker.develop', $('#worker').value);
-  save('agents.' + MODE, formAgents());
+  // Keep a persona only when the user edited it, so changes to the default persona still reach them.
+  const ag = formAgents();
+  for (const [id, a] of Object.entries(ag)) if (a.role === CFG.agents[id]?.role) delete a.role;
+  save('agents.' + MODE, ag);
+  save('rolesV', 2);
 }
 function restoreForm() {
   for (const f of FIELDS) { const v = load(f); if (v != null) $('#' + f).value = v; }
