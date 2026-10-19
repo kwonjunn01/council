@@ -103,7 +103,8 @@
     "publish": {
       "provider": "github",
       "owner": "kwonjunn01",
-      "repo": "council"
+      "repo": "council",
+      "releaseType": "release"
     },
     "deb": {
       "depends": [
