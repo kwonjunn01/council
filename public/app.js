@@ -3,27 +3,36 @@ const $ = (s) => document.querySelector(s);
 const PHASE = {
   opening: '블라인드 오프닝', debate: '토론', escalate: '레드팀 공격', brief: '라운드 정리',
   plan: '독립 계획', 'plan-debate': '계획 토론', 'plan-brief': '계획 정리', 'plan-final': '계획 확정',
-  implement: '구현', review: '리뷰', 'work-order': '작업 지시', final: '최종 보고', test: '테스트', summary: '요약',
+  implement: '구현', review: '리뷰', 'work-order': '작업 지시', final: '최종 보고', test: '테스트', summary: '요약', check: '점검',
 };
-const STATUS = { running: '진행 중', paused: '일시정지', done: '완료', stopped: '중단됨', error: '오류' };
-const DEFAULT_ROLES = { moderator: 'claude', worker: 'codex' };
+const STATUS = { created: '준비', running: '진행 중', paused: '일시정지', done: '완료', stopped: '중단됨', error: '오류', interrupted: '중단됨(앱 종료)' };
+const DEFAULT_ROLES = { moderator: 'claude', worker: 'deepseek' };
 const MODE_HINT = {
-  debate: '셋이 모두 토론합니다. 모더레이터가 먼저 입장을 내고, 나머지가 반박한 뒤, 모더레이터가 쟁점과 다음 질문을 정리합니다. 전원 AGREE면 합의.',
-  develop: '① 블라인드 계획 → 셋이 계획 토론 → PLAN.md 확정  ② 워커 구현 → 테스트 → 리뷰어 비판 → 모더레이터 작업지시 → 반복. 워커 턴마다 git 자동 커밋.',
+  debate: '선택한 모델들이 토론합니다. 모더레이터가 입장을 내고 → 나머지가 이름을 불러 반박 → 모더레이터가 쟁점·다음 질문 정리. 투표한 전원이 AGREE면 합의.',
+  develop: '① 워커를 뺀 나머지가 블라인드 계획 → 계획 토론 → PLAN.md 확정  ② 워커가 구현 → git 체크포인트 → 테스트 → 리뷰어 비판 → 모더레이터 작업 지시 → 반복. 워커가 막히면 다른 모델이 대신 구현.',
 };
 
-let CFG = null, RUN = null, MODE = 'debate';
+let CFG = null, SESSIONS = [], SEL = null, RUN = null, CHECK = {}, MODE = 'debate';
 const live = new Map();
 
+// ---------- utils ----------
 async function api(name, body) {
   const opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Council': '1' }, body: JSON.stringify(body) };
   const res = await fetch('/api/' + name, opt);
-  const j = await res.json();
+  const j = await res.json().catch(() => ({ error: res.statusText }));
   if (!res.ok || j?.error) throw new Error(j?.error || res.statusText);
   return j;
 }
-
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const base = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || p;
+const hhmm = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function ago(t) {
+  const s = (Date.now() - new Date(t)) / 1000;
+  if (s < 60) return '방금'; if (s < 3600) return `${Math.floor(s / 60)}분 전`; if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  return new Date(t).toLocaleDateString();
+}
+function load(k) { try { return JSON.parse(localStorage.getItem('council.' + k)); } catch { return null; } }
+function save(k, v) { try { localStorage.setItem('council.' + k, JSON.stringify(v)); } catch {} }
 
 function inline(s) {
   return s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
@@ -34,9 +43,17 @@ function md(src) {
   let html = '';
   parts.forEach((p, i) => {
     if (i % 2) { const nl = p.indexOf('\n'); html += `<pre><code>${esc(nl >= 0 ? p.slice(nl + 1) : p).replace(/\n$/, '')}</code></pre>`; return; }
-    let list = false;
-    for (const raw of esc(p.replace(/^[^\n]*\n?/, i ? '' : '$&')).split('\n')) {
+    if (i) p = p.replace(/^[^\n]*\n?/, '');
+    let list = false, table = false;
+    for (const raw of esc(p).split('\n')) {
       const line = raw.trimEnd();
+      if (/^\s*\|.*\|\s*$/.test(line)) {
+        if (/^\s*\|[\s:|-]+\|\s*$/.test(line)) continue;
+        if (!table) { html += '<table>'; table = true; }
+        html += '<tr>' + line.trim().slice(1, -1).split('|').map((c) => `<td>${inline(c.trim())}</td>`).join('') + '</tr>';
+        continue;
+      }
+      if (table) { html += '</table>'; table = false; }
       const li = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)/);
       if (li) { if (!list) { html += '<ul>'; list = true; } html += `<li>${inline(li[1])}</li>`; continue; }
       if (list) { html += '</ul>'; list = false; }
@@ -45,53 +62,127 @@ function md(src) {
       else if (line.trim()) html += `<p>${inline(line)}</p>`;
     }
     if (list) html += '</ul>';
+    if (table) html += '</table>';
   });
   return html;
 }
 
 const agentLabel = (id) => (id === 'tests' ? '테스트' : CFG.agents[id]?.label || id);
 const agentColor = (id) => (id === 'tests' ? 'var(--muted)' : CFG.agents[id]?.color || 'var(--muted)');
+const isActive = (r) => r && ['running', 'paused', 'created'].includes(r.status);
 
-function roleOf(id) {
-  if (!RUN) return '';
-  const r = [];
-  if (id === RUN.moderator) r.push('모더레이터');
-  if (RUN.mode === 'develop' && id === RUN.worker) r.push(RUN.workerMode === 'rotate' ? '워커(교대)' : '메인 워커');
-  if (RUN.mode === 'develop' && !r.length && id !== 'tests') r.push('리뷰어');
-  return r.join(' · ');
+function roleOf(id, r = RUN) {
+  if (!r) return '';
+  const out = [];
+  if (id === r.moderator) out.push('모더레이터');
+  if (r.mode === 'develop' && id === r.worker) out.push(r.workerMode === 'rotate' ? '워커(교대)' : '메인 워커');
+  if (r.mode === 'develop' && !out.length && id !== 'tests') out.push('리뷰어');
+  return out.join(' · ');
+}
+
+// ---------- toasts & notifications ----------
+function toast(level, text, sub, onClick) {
+  const el = document.createElement('div');
+  el.className = `toast ${level}`;
+  el.innerHTML = `${esc(text)}${sub ? `<small>${esc(sub)}</small>` : ''}`;
+  el.onclick = () => { el.remove(); onClick?.(); };
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), level === 'error' ? 15000 : 7000);
+}
+function notify(title, body, runId) {
+  if (!('Notification' in window) || Notification.permission !== 'granted' || document.hasFocus()) return;
+  const n = new Notification(title, { body, icon: 'icon.png' });
+  n.onclick = () => { window.focus(); if (runId) select(runId); n.close(); };
+}
+
+// ---------- sessions sidebar ----------
+let listTimer = null;
+function refreshSessions() {
+  clearTimeout(listTimer);
+  listTimer = setTimeout(async () => { try { SESSIONS = await api('sessions'); renderSessions(); } catch {} }, 250);
+}
+function renderSessions() {
+  const box = $('#sessionList');
+  const act = SESSIONS.filter(isActive), rest = SESSIONS.filter((s) => !isActive(s));
+  const item = (s) => {
+    const dot = s.waitingUntil ? 'waiting' : s.status;
+    return `<button class="sitem ${s.id === SEL ? 'sel' : ''}" data-id="${esc(s.id)}" title="${esc(s.projectDir)}">
+      <div class="t"><span class="dot ${dot}"></span><span>${esc(s.topic || '(제목 없음)')}</span></div>
+      <div class="s">${esc(base(s.projectDir))} · ${s.mode === 'develop' ? '개발' : '토론'} · R${s.round || 0} · ${esc(STATUS[s.status] || s.status)} · ${ago(s.updatedAt || s.startedAt)}</div></button>`;
+  };
+  box.innerHTML = (act.length ? `<div class="sgroup">실행 중 ${act.length}</div>${act.map(item).join('')}` : '')
+    + (rest.length ? `<div class="sgroup">기록</div>${rest.map(item).join('')}` : '')
+    + (!SESSIONS.length ? '<div class="hint" style="padding:8px">아직 세션이 없습니다.</div>' : '');
+  box.querySelectorAll('.sitem').forEach((b) => { b.onclick = () => select(b.dataset.id); });
+  const dirs = [...new Set(SESSIONS.map((s) => s.projectDir))];
+  $('#recentDirs').innerHTML = dirs.map((d) => `<option value="${esc(d)}">`).join('');
+}
+
+function showNew() {
+  SEL = null; RUN = null;
+  save('sel', null);
+  $('#setupView').hidden = false;
+  $('#runView').hidden = true;
+  renderSessions();
+}
+
+async function select(id) {
+  SEL = id;
+  save('sel', id);
+  try {
+    RUN = await api('state?runId=' + encodeURIComponent(id));
+  } catch (e) { toast('error', e.message); return showNew(); }
+  $('#setupView').hidden = true;
+  $('#runView').hidden = false;
+  live.forEach((el) => el.remove());
+  live.clear();
+  renderRun();
+  renderFeed();
+  renderSessions();
 }
 
 // ---------- setup form ----------
-function renderAgents(check = {}) {
+function renderAgents() {
   const box = $('#agentsBox');
-  const saved = load('agents') || {};
+  const saved = load('agents.' + MODE) || {};
   box.innerHTML = '';
   for (const [id, a] of Object.entries(CFG.agents)) {
-    const st = check[id];
-    const on = saved[id]?.on ?? a.enabled;
+    const st = CHECK[id];
+    const on = saved[id]?.on ?? (a.enabled && !(a.executor && MODE === 'debate'));
     const el = document.createElement('div');
-    el.className = 'agent';
+    el.className = 'agent' + (on ? '' : ' off');
     el.innerHTML = `<div class="head">
         <input type="checkbox" data-id="${id}" ${on ? 'checked' : ''}>
-        <span class="dot ${st ? (st.ok ? 'ok' : 'bad') : ''}" title="${esc(st ? (st.ok ? st.version : st.error) : '확인 중')}"></span>
+        <span class="dot ${st ? (st.ok ? 'ok' : 'bad') : ''}"></span>
         <span class="name" style="color:${a.color}">${esc(a.label)}</span>
-        <span class="ver">${esc(st ? (st.ok ? st.version : st.error) : '확인 중…')}</span></div>
-      <details><summary>페르소나 편집</summary><textarea rows="3" data-role="${id}">${esc(saved[id]?.role || a.role)}</textarea></details>`;
+        <span class="ver ${st && !st.ok ? 'bad' : ''}" title="${esc(st ? (st.ok ? st.version : st.error) : '')}">${esc(st ? (st.ok ? st.version : st.error) : '확인 중…')}</span>
+        ${st?.needsKey ? '<button type="button" class="keylink">키 설정</button>' : ''}</div>
+      <div class="sub">
+        <input data-model="${id}" placeholder="${a.hasModel ? '모델 (기본값)' : '모델 지정 불가'}" value="${esc(saved[id]?.model ?? a.model ?? '')}" ${a.hasModel ? '' : 'disabled'}>
+        <input data-cmd="${id}" value="${esc(a.cmd)}" disabled title="명령은 ⚙ 설정에서 변경">
+        <textarea rows="2" data-role="${id}" placeholder="페르소나">${esc(saved[id]?.role || a.role)}</textarea>
+      </div>`;
     box.appendChild(el);
   }
-  box.querySelectorAll('input,textarea').forEach((x) => x.addEventListener('change', () => { saveForm(); fillRoleSelects(); }));
+  box.querySelectorAll('.keylink').forEach((b) => { b.onclick = openSettings; });
+  box.querySelectorAll('input[type=checkbox]').forEach((x) => x.addEventListener('change', () => {
+    x.closest('.agent').classList.toggle('off', !x.checked);
+    saveForm(); fillRoleSelects();
+  }));
+  box.querySelectorAll('[data-model],[data-role]').forEach((x) => x.addEventListener('change', saveForm));
   fillRoleSelects();
 }
 
-function selectedAgents() { return [...document.querySelectorAll('#agentsBox input[type=checkbox]:checked')].map((x) => x.dataset.id); }
+const selectedAgents = () => [...document.querySelectorAll('#agentsBox input[type=checkbox]:checked')].map((x) => x.dataset.id);
 
 function fillRoleSelects() {
   const ids = selectedAgents();
   const opt = (v, t) => `<option value="${v}">${esc(t)}</option>`;
   for (const [sel, extra, key] of [['#moderator', opt('none', '없음 (투표만)'), 'moderator'], ['#worker', opt('rotate', '라운드마다 교대'), 'worker']]) {
-    const cur = $(sel).value || load(key) || DEFAULT_ROLES[key];
+    const cur = load(`${key}.${MODE}`) || DEFAULT_ROLES[key];
     $(sel).innerHTML = ids.map((id) => opt(id, CFG.agents[id].label)).join('') + extra;
-    $(sel).value = [...$(sel).options].some((o) => o.value === cur) ? cur : (key === 'worker' ? (ids.find((i) => i !== $('#moderator').value) || ids[0] || 'rotate') : ids[0] || 'none');
+    const fallback = key === 'worker' ? (ids.find((i) => i !== $('#moderator').value) || 'rotate') : (ids[0] || 'none');
+    $(sel).value = [...$(sel).options].some((o) => o.value === cur) ? cur : fallback;
   }
 }
 
@@ -101,26 +192,30 @@ function setMode(m) {
   $('#setup').className = m;
   $('#modeHint').textContent = MODE_HINT[m];
   save('mode', m);
+  if (CFG) renderAgents(); // each mode remembers its own line-up
 }
 
-function load(k) { try { return JSON.parse(localStorage.getItem('council.' + k)); } catch { return null; } }
-function save(k, v) { try { localStorage.setItem('council.' + k, JSON.stringify(v)); } catch {} }
 const FIELDS = ['projectDir', 'topic', 'maxRounds', 'planRounds', 'language', 'testCmd', 'issue'];
 const CHECKS = ['relentless', 'blindOpening', 'branch', 'publish'];
+function formAgents() {
+  const out = {};
+  document.querySelectorAll('#agentsBox input[type=checkbox]').forEach((x) => {
+    const id = x.dataset.id;
+    out[id] = { on: x.checked, model: document.querySelector(`[data-model="${id}"]`).value.trim(), role: document.querySelector(`[data-role="${id}"]`).value };
+  });
+  return out;
+}
 function saveForm() {
   for (const f of FIELDS) save(f, $('#' + f).value);
   for (const c of CHECKS) save(c, $('#' + c).checked);
-  save('moderator', $('#moderator').value);
-  save('worker', $('#worker').value);
-  const agents = {};
-  document.querySelectorAll('#agentsBox input[type=checkbox]').forEach((x) => {
-    agents[x.dataset.id] = { on: x.checked, role: document.querySelector(`[data-role="${x.dataset.id}"]`).value };
-  });
-  save('agents', agents);
+  save(`moderator.${MODE}`, $('#moderator').value);
+  if (MODE === 'develop') save('worker.develop', $('#worker').value);
+  save('agents.' + MODE, formAgents());
 }
 function restoreForm() {
   for (const f of FIELDS) { const v = load(f); if (v != null) $('#' + f).value = v; }
   for (const c of CHECKS) if (load(c) != null) $('#' + c).checked = load(c);
+  if (CFG.language && !load('language')) $('#language').value = CFG.language;
   setMode(load('mode') || 'debate');
 }
 
@@ -128,135 +223,61 @@ async function start(e) {
   e.preventDefault();
   $('#err').textContent = '';
   saveForm();
-  const roles = {};
-  document.querySelectorAll('[data-role]').forEach((t) => { roles[t.dataset.role] = t.value; });
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  const ag = formAgents();
+  const roles = {}, models = {};
+  for (const [id, a] of Object.entries(ag)) { roles[id] = a.role; models[id] = a.model; }
+  $('#startBtn').disabled = true;
   try {
-    await api('start', {
-      projectDir: $('#projectDir').value, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles,
+    const { id } = await api('start', {
+      projectDir: $('#projectDir').value, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles, models,
       moderator: $('#moderator').value, worker: $('#worker').value,
       maxRounds: $('#maxRounds').value, planRounds: $('#planRounds').value, language: $('#language').value,
       testCmd: $('#testCmd').value, relentless: $('#relentless').checked, blindOpening: $('#blindOpening').checked,
       issue: $('#issue').value, branch: $('#branch').checked, publish: $('#publish').checked,
     });
+    $('#topic').value = '';
+    $('#issue').value = '';
+    saveForm();
+    refreshSessions();
+    await select(id);
   } catch (err) { $('#err').textContent = err.message; }
+  finally { $('#startBtn').disabled = false; }
 }
 
-// ---------- feed ----------
-function msgEl(m) {
-  const el = document.createElement('div');
-  if (m.kind === 'system') { el.className = 'msg system'; el.textContent = m.text; return el; }
-  const cls = m.kind === 'test' ? `test ${m.ok ? 'pass' : 'fail'}` : m.kind;
-  el.className = `msg ${cls}`;
-  const who = m.kind === 'user' ? '🧑 중재자 (나)' : m.kind === 'test' ? '🧪 테스트' : agentLabel(m.agent);
-  if (m.kind === 'agent') el.style.setProperty('--c', agentColor(m.agent));
-  const role = m.kind === 'agent' ? roleOf(m.agent) : '';
-  el.innerHTML = `<div class="mh"><span class="who">${esc(who)}</span>
-      ${role ? `<span class="tag role">${esc(role)}</span>` : ''}
-      <span class="tag">R${m.round}${m.phase ? ' · ' + esc(PHASE[m.phase] || m.phase) : ''}</span>
-      ${m.vote ? `<span class="vote ${m.vote}">${m.vote}</span>` : ''}
-      ${m.durationMs ? `<span>${Math.round(m.durationMs / 1000)}s</span>` : ''}
-      <span style="margin-left:auto">${new Date(m.ts).toLocaleTimeString()}</span></div>
-    <div class="md">${md(m.text)}</div>`;
-  if ((m.text || '').length > 1800) {
-    el.classList.add('collapsed');
-    const b = document.createElement('button');
-    b.className = 'more'; b.textContent = '펼치기 ▾';
-    b.onclick = () => { const c = el.classList.toggle('collapsed'); b.textContent = c ? '펼치기 ▾' : '접기 ▴'; };
-    el.appendChild(b);
-  }
-  return el;
-}
-
-function nearBottom() { const s = $('#scroller'); return s.scrollHeight - s.scrollTop - s.clientHeight < 160; }
-function toBottom(force) { const s = $('#scroller'); if (force) s.scrollTop = s.scrollHeight; }
-
-function renderFeed() {
-  const feed = $('#feed');
-  feed.innerHTML = '';
-  if (!RUN) { feed.innerHTML = '<div class="empty">왼쪽에서 프로젝트와 미션을 정하고 시작하세요.</div>'; return; }
-  RUN.messages.forEach((m) => feed.appendChild(msgEl(m)));
-  toBottom(true);
-}
-
-function liveStart(ev) {
-  let box = live.get(ev.key);
-  if (!box) {
-    box = document.createElement('div');
-    box.className = 'msg livebox';
-    $('#live').appendChild(box);
-    live.set(ev.key, box);
-  }
-  box.style.setProperty('--c', agentColor(ev.agent));
-  box.innerHTML = `<div class="mh"><span class="who typing">${esc(agentLabel(ev.agent))}</span>
-    <span class="tag">R${ev.round ?? ''} · ${esc(PHASE[ev.phase] || ev.phase || '')}</span><span class="elapsed" data-t="${Date.now()}"></span></div><pre></pre>`;
-}
-function liveChunk(ev) {
-  const box = live.get(ev.key);
-  if (!box) return;
-  const pre = box.querySelector('pre');
-  const span = document.createElement('span');
-  if (ev.stream === 'tool') span.className = 'tool';
-  span.textContent = ev.chunk;
-  pre.appendChild(span);
-  while (pre.textContent.length > 6000 && pre.firstChild) pre.removeChild(pre.firstChild);
-  pre.scrollTop = pre.scrollHeight;
-}
-function liveSync() {
-  const keys = new Set((RUN?.active || []).map((a) => a.key));
-  for (const [k, el] of live) if (!keys.has(k)) { el.remove(); live.delete(k); }
-  for (const a of RUN?.active || []) if (!live.has(a.key)) liveStart({ key: a.key, agent: a.agent, phase: a.phase, round: RUN.round });
-}
-setInterval(() => document.querySelectorAll('.elapsed').forEach((e) => { e.textContent = Math.round((Date.now() - e.dataset.t) / 1000) + 's'; }), 1000);
-
-function renderRun() {
-  const active = RUN && ['running', 'paused'].includes(RUN.status);
-  $('#setup').hidden = !!active;
-  $('#controls').hidden = !RUN;
-  $('#newBtn').hidden = !!active;
-  const canPublish = RUN && !active && (RUN.mode === 'develop' ? !!RUN.branch : !!RUN.issue);
-  $('#publishBtn').hidden = !canPublish;
-  $('#publishBtn').disabled = !!RUN?.publishing;
-  $('#publishBtn').textContent = RUN?.publishing ? '🐙 게시 중…' : RUN?.published ? '🐙 GitHub 다시 게시 (업데이트)' : (RUN?.mode === 'develop' ? '🐙 push + PR 만들기' : '🐙 이슈에 결론 게시');
-  $('#publishedLink').hidden = !RUN?.published;
-  if (RUN?.published) { $('#publishedLink').href = RUN.published; $('#publishedLink').textContent = '↗ ' + RUN.published; }
-  ['#pauseBtn', '#finishBtn', '#killBtn'].forEach((s) => { $(s).disabled = !active; });
-  if (!RUN) { $('#runTitle').textContent = '세션 없음'; $('#runMeta').innerHTML = ''; return; }
-  $('#statusDot').className = RUN.status;
-  $('#statusText').textContent = `${STATUS[RUN.status] || RUN.status} · 라운드 ${RUN.round}${RUN.maxRounds ? '/' + RUN.maxRounds : ' (무제한)'}`;
-  $('#pauseBtn').textContent = RUN.paused ? '▶️ 재개' : '⏸ 일시정지';
-  $('#runTitle').textContent = RUN.topic.split('\n')[0];
-  const stage = RUN.mode === 'develop' ? (RUN.stage === 'plan' ? '계획 단계' : '빌드 단계') : '토론';
-  $('#runMeta').innerHTML = [
-    `<span>${RUN.mode === 'develop' ? '🛠 개발' : '💬 토론'} · ${stage}</span>`,
-    `<span>📁 ${esc(RUN.projectDir)}</span>`,
-    RUN.branch ? `<span>🌿 ${esc(RUN.branch)} ← ${esc(RUN.baseBranch)}</span>` : '',
-    RUN.issue ? `<span>🐙 <a href="${esc(RUN.issue.url)}" target="_blank">#${RUN.issue.number}</a></span>` : '',
-    RUN.published ? `<span>🔗 <a href="${esc(RUN.published)}" target="_blank">게시됨</a></span>` : '',
-    ...RUN.agents.map((a) => `<span style="color:${agentColor(a)}">● ${esc(agentLabel(a))}${roleOf(a) ? ` (${esc(roleOf(a))})` : ''}</span>`),
-    RUN.relentless ? '<span>🔥 무자비</span>' : '',
-    `<span title="${esc(RUN.runDir)}">🗂 .council/runs/${esc(RUN.id)}</span>`,
-  ].join('');
-  $('#plan').hidden = !RUN.plan;
-  if (RUN.plan) $('#planBody').innerHTML = md(RUN.plan);
-  liveSync();
+async function probe() {
+  const ids = selectedAgents();
+  if (!ids.length) return;
+  $('#probeBtn').disabled = true;
+  $('#probeResult').className = 'hint';
+  $('#probeResult').textContent = `${ids.map(agentLabel).join(', ')}에 실제로 한 줄 질문을 보내는 중… (최대 3분)`;
+  const models = Object.fromEntries(Object.entries(formAgents()).map(([k, v]) => [k, v.model]));
+  try {
+    const res = await api('preflight', { agents: ids, models });
+    const lines = Object.entries(res).map(([id, r]) => r.ok ? `✅ ${agentLabel(id)} — ${(r.ms / 1000).toFixed(1)}s` : `❌ ${agentLabel(id)} — ${r.hint}\n   ${r.detail.split('\n').pop()}`);
+    const allOk = Object.values(res).every((r) => r.ok);
+    $('#probeResult').className = 'hint ' + (allOk ? 'ok' : 'bad');
+    $('#probeResult').textContent = lines.join('\n');
+  } catch (e) { $('#probeResult').className = 'hint bad'; $('#probeResult').textContent = e.message; }
+  finally { $('#probeBtn').disabled = false; }
 }
 
 async function checkGithub() {
   const dir = $('#projectDir').value.trim();
   const el = $('#ghStatus');
-  if (!dir) { el.className = 'hint'; el.textContent = '프로젝트 폴더를 입력하면 저장소를 확인합니다.'; return; }
-  el.className = 'hint'; el.textContent = '확인 중…';
+  if (!dir) { el.className = 'hint'; el.textContent = ''; return; }
+  el.className = 'hint'; el.textContent = '저장소 확인 중…';
   try {
     const g = await api('github?projectDir=' + encodeURIComponent(dir));
     const parts = [];
     let ok = true;
-    if (!g.git) { parts.push('git 저장소 아님 (체크포인트·브랜치·PR 불가 — git init 권장)'); ok = false; }
-    else parts.push(g.repo ? `github.com/${g.repo}` : (g.remote ? `remote: ${g.remote}` : 'remote 없음'), `브랜치 ${g.branch}`);
-    if (!g.gh) { parts.push('gh CLI 없음 (이슈/PR 기능 불가)'); ok = false; }
-    else if (!g.authed) { parts.push('gh 로그인 필요: gh auth login'); ok = false; }
-    else parts.push('gh 로그인됨');
-    el.className = 'hint ' + (ok && g.repo ? 'ok' : 'bad');
-    el.textContent = (ok && g.repo ? '✓ ' : '⚠ ') + parts.join(' · ');
+    if (!g.git) { parts.push('git 저장소 아님 — 개발 모드는 git init 권장 (체크포인트·되돌리기·PR)'); ok = false; }
+    else parts.push(g.repo ? `github.com/${g.repo}` : (g.remote ? 'remote: ' + g.remote : 'GitHub remote 없음'), `브랜치 ${g.branch}`);
+    if (!g.gh) parts.push('gh CLI 없음 (이슈/PR 불가)');
+    else if (!g.authed) parts.push('gh 로그인 필요: gh auth login');
+    const full = ok && g.repo && g.authed;
+    el.className = 'hint ' + (full ? 'ok' : ok ? '' : 'bad');
+    el.textContent = (full ? '✓ ' : ok ? '· ' : '⚠ ') + parts.join(' · ');
   } catch (err) { el.className = 'hint bad'; el.textContent = err.message; }
 }
 
@@ -271,65 +292,262 @@ async function previewIssue() {
   } catch (err) { el.className = 'hint bad'; el.textContent = err.message; }
 }
 
+// ---------- session view ----------
+function msgEl(m) {
+  const el = document.createElement('div');
+  if (m.kind === 'system') {
+    el.className = 'msg system';
+    el.textContent = m.text;
+    if (m.sha && !isActive(RUN) && RUN?.git) {
+      const b = document.createElement('button');
+      b.textContent = '⏪ 이 시점으로 되돌리기';
+      b.onclick = async () => {
+        if (!confirm(`${m.sha.slice(0, 8)} 이후의 변경을 모두 버리고 되돌릴까요? (git reflog로 복구 가능)`)) return;
+        try { await api('rollback', { runId: SEL, sha: m.sha }); } catch (e) { toast('error', e.message); }
+      };
+      el.appendChild(b);
+    }
+    return el;
+  }
+  const cls = m.kind === 'test' ? `test ${m.ok ? 'pass' : 'fail'}` : m.kind;
+  el.className = `msg ${cls}${m.kind === 'agent' && m.ok === false ? ' failed' : ''}`;
+  const who = m.kind === 'user' ? '🧑 나 (중재자)' : m.kind === 'test' ? '🧪 테스트' : agentLabel(m.agent);
+  if (m.kind === 'agent') el.style.setProperty('--c', agentColor(m.agent));
+  const role = m.kind === 'agent' ? roleOf(m.agent) : '';
+  el.innerHTML = `<div class="mh"><span class="who">${esc(who)}</span>
+      ${role ? `<span class="tag role">${esc(role)}</span>` : ''}
+      <span class="tag">R${m.round}${m.phase ? ' · ' + esc(PHASE[m.phase] || m.phase) : ''}</span>
+      ${m.vote ? `<span class="vote ${m.vote}">${m.vote}</span>` : ''}
+      ${m.model ? `<span>${esc(m.model)}</span>` : ''}
+      ${m.durationMs ? `<span>${Math.round(m.durationMs / 1000)}s</span>` : ''}
+      ${m.costUsd ? `<span>$${m.costUsd.toFixed(3)}</span>` : ''}
+      <span style="margin-left:auto">${hhmm(m.ts)}</span></div>
+    <div class="md">${md(m.text)}</div>`;
+  if ((m.text || '').length > 1800) {
+    el.classList.add('collapsed');
+    const b = document.createElement('button');
+    b.className = 'more'; b.textContent = '펼치기 ▾';
+    b.onclick = () => { const c = el.classList.toggle('collapsed'); b.textContent = c ? '펼치기 ▾' : '접기 ▴'; };
+    el.appendChild(b);
+  }
+  return el;
+}
+
+const nearBottom = () => { const s = $('#scroller'); return s.scrollHeight - s.scrollTop - s.clientHeight < 160; };
+const toBottom = (force) => { if (force) $('#scroller').scrollTop = $('#scroller').scrollHeight; };
+
+function renderFeed() {
+  const feed = $('#feed');
+  feed.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  (RUN?.messages || []).forEach((m) => frag.appendChild(msgEl(m)));
+  feed.appendChild(frag);
+  toBottom(true);
+}
+
+function liveStart(ev) {
+  let box = live.get(ev.key);
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'msg livebox';
+    $('#live').appendChild(box);
+    live.set(ev.key, box);
+  }
+  box.style.setProperty('--c', agentColor(ev.agent));
+  box.innerHTML = `<div class="mh"><span class="who typing">${esc(agentLabel(ev.agent))}</span>
+    <span class="tag">R${ev.round ?? ''} · ${esc(PHASE[ev.phase] || ev.phase || '')}</span><span class="elapsed" data-t="${ev.startedAt || Date.now()}"></span></div><pre></pre>`;
+}
+function liveChunk(ev) {
+  const box = live.get(ev.key);
+  if (!box) return;
+  const pre = box.querySelector('pre');
+  const span = document.createElement('span');
+  if (ev.stream === 'tool') span.className = 'tool';
+  span.textContent = ev.chunk;
+  pre.appendChild(span);
+  while (pre.textContent.length > 8000 && pre.firstChild) pre.removeChild(pre.firstChild);
+  pre.scrollTop = pre.scrollHeight;
+}
+function liveSync() {
+  const keys = new Set((RUN?.active || []).map((a) => a.key));
+  for (const [k, el] of live) if (!keys.has(k)) { el.remove(); live.delete(k); }
+  for (const a of RUN?.active || []) if (!live.has(a.key)) liveStart({ ...a, round: RUN.round });
+}
+setInterval(() => document.querySelectorAll('.elapsed').forEach((e) => { e.textContent = Math.round((Date.now() - e.dataset.t) / 1000) + 's'; }), 1000);
+
+function renderRun() {
+  const r = RUN;
+  if (!r) return;
+  const active = isActive(r);
+  $('#statusDot').className = r.status;
+  $('#runTitle').textContent = r.topic.split('\n')[0];
+  $('#runTitle').title = r.topic;
+  $('#pauseBtn').hidden = !active;
+  $('#pauseBtn').textContent = r.paused || r.status === 'paused' ? '▶ 재개' : '⏸ 일시정지';
+  $('#finishBtn').hidden = !active;
+  $('#killBtn').hidden = !active;
+  $('#continueBtn').hidden = active;
+  $('#deleteBtn').hidden = active;
+  const canPublish = !active && (r.mode === 'develop' ? !!r.branch : !!r.issue);
+  $('#publishBtn').hidden = !canPublish;
+  $('#publishBtn').disabled = !!r.publishing;
+  $('#publishBtn').textContent = r.publishing ? '🐙 게시 중…' : r.published ? '🐙 다시 게시' : (r.mode === 'develop' ? '🐙 push + PR' : '🐙 이슈에 게시');
+
+  const stage = r.mode === 'develop' ? (r.stage === 'plan' ? '계획 단계' : '빌드 단계') : '토론';
+  const cost = Object.values(r.cost || {}).reduce((a, b) => a + b, 0);
+  const agentChip = (a) => {
+    const cool = r.cooling?.[a];
+    return `<span style="color:${agentColor(a)}">● ${esc(agentLabel(a))}${roleOf(a, r) ? ` (${esc(roleOf(a, r))})` : ''}${cool ? ` ⏳${hhmm(cool)}` : ''}</span>`;
+  };
+  $('#runMeta').innerHTML = [
+    `<span>${STATUS[r.status] || r.status} · R${r.round}${r.maxRounds ? '/' + r.maxRounds : ' (무제한)'} · ${r.mode === 'develop' ? '🛠' : '💬'} ${stage}</span>`,
+    `<span title="${esc(r.projectDir)}">📁 ${esc(base(r.projectDir))}</span>`,
+    r.branch ? `<span>🌿 ${esc(r.branch)} ← ${esc(r.baseBranch)}</span>` : '',
+    r.issue ? `<span>🐙 <a href="${esc(r.issue.url)}" target="_blank">#${r.issue.number}</a></span>` : '',
+    r.published ? `<span>🔗 <a href="${esc(r.published)}" target="_blank">게시됨</a></span>` : '',
+    ...r.agents.map(agentChip),
+    ...Object.keys(r.benched || {}).map((a) => `<span style="text-decoration:line-through" title="${esc(r.benched[a])}">${esc(agentLabel(a))}</span>`),
+    r.relentless ? '<span>🔥 무자비</span>' : '',
+    cost ? `<span title="Claude 계열 CLI가 보고한 비용">💲${cost.toFixed(2)}</span>` : '',
+    `<span title="${esc(r.runDir)}">🗂 .council/runs/${esc(r.id)}</span>`,
+  ].filter(Boolean).join('');
+  const notes = [];
+  if (r.statusNote) notes.push(`<span class="warn">⚠ ${esc(r.statusNote)}</span>`);
+  if (r.waitingUntil) notes.push(`<span class="warn">⏳ 모든 에이전트 한도 대기 — ${hhmm(r.waitingUntil)}에 자동 재개</span>`);
+  for (const [a, why] of Object.entries(r.benched || {})) notes.push(`<span class="bad">🚫 ${esc(agentLabel(a))}: ${esc(why)}</span>`);
+  $('#statusLine').innerHTML = notes.join(' · ');
+  $('#plan').hidden = !r.plan;
+  if (r.plan && $('#planBody').dataset.src !== r.plan) { $('#planBody').innerHTML = md(r.plan); $('#planBody').dataset.src = r.plan; }
+  liveSync();
+}
+
+// ---------- settings ----------
+async function openSettings() {
+  $('#settings').showModal();
+  $('#secretsMsg').textContent = '';
+  $('#configMsg').textContent = '';
+  try {
+    const [secrets, conf] = await Promise.all([api('secrets', {}), api('settings', {})]);
+    renderSecrets(secrets);
+    $('#configText').value = conf.text;
+    $('#configPath').textContent = conf.path;
+    $('#defaultsText').textContent = conf.defaults;
+  } catch (e) { $('#configMsg').textContent = e.message; }
+}
+function renderSecrets(list) {
+  $('#secretsBox').innerHTML = list.length ? list.map((s) => `<div class="secret">
+      <span class="k">${esc(s.name)}</span>
+      <input type="password" data-secret="${esc(s.name)}" placeholder="${s.set ? '•••••• (저장됨 — 바꾸려면 입력)' : '키를 붙여넣으세요'}" autocomplete="off">
+      <span class="st">${s.fromEnv ? '✓ 환경변수' : s.set ? '✓ 저장됨' : '✗ 없음'} ${s.set && !s.fromEnv ? `<label class="check" style="display:inline-flex;margin:0"><input type="checkbox" data-del="${esc(s.name)}"> 삭제</label>` : ''}</span>
+    </div>`).join('') : '<p class="hint">API 키가 필요한 에이전트가 없습니다.</p>';
+}
+async function saveSecretsNow() {
+  const values = {};
+  document.querySelectorAll('[data-secret]').forEach((i) => { if (i.value.trim()) values[i.dataset.secret] = i.value.trim(); });
+  document.querySelectorAll('[data-del]:checked').forEach((c) => { values[c.dataset.del] = ''; });
+  if (!Object.keys(values).length) { $('#secretsMsg').textContent = '변경 없음'; return; }
+  try {
+    renderSecrets(await api('secrets', { values }));
+    $('#secretsMsg').className = 'hint ok';
+    $('#secretsMsg').textContent = '저장됨';
+    reloadChecks();
+  } catch (e) { $('#secretsMsg').className = 'hint bad'; $('#secretsMsg').textContent = e.message; }
+}
+async function saveConfigNow() {
+  try {
+    await api('settings', { text: $('#configText').value });
+    $('#configMsg').className = 'hint ok';
+    $('#configMsg').textContent = '저장·적용됨 (새 세션부터 반영)';
+  } catch (e) { $('#configMsg').className = 'hint bad'; $('#configMsg').textContent = e.message; }
+}
+
+async function reloadConfig() {
+  CFG = await api('config');
+  renderAgents();
+  reloadChecks();
+}
+function reloadChecks() { api('check').then((c) => { CHECK = c; renderAgents(); }).catch(() => {}); }
+
+// ---------- events ----------
 function connect() {
   const es = new EventSource('/events');
   es.onmessage = (e) => {
     const ev = JSON.parse(e.data);
+    if (ev.type === 'hello') { refreshSessions(); if (SEL) select(SEL); return; }
+    if (ev.type === 'sessions') return refreshSessions();
+    if (ev.type === 'config') return reloadConfig();
+    if (ev.type === 'alert') {
+      const mine = ev.runId === SEL;
+      toast(ev.level, ev.text, mine ? '' : ev.topic, () => select(ev.runId));
+      if (ev.level !== 'warn' || /한도/.test(ev.text)) notify(`Council — ${ev.topic}`, ev.text, ev.runId);
+      return;
+    }
+    if (!ev.runId || ev.runId !== SEL || !RUN) return;
     const stick = nearBottom();
-    if (ev.type === 'snapshot') { RUN = ev.run; renderRun(); renderFeed(); return; }
     if (ev.type === 'run') {
-      if (!RUN || RUN.id !== ev.run.id) { RUN = { ...ev.run, messages: [] }; renderFeed(); }
-      else RUN = { ...RUN, ...ev.run };
+      const wasActive = isActive(RUN);
+      RUN = { ...RUN, ...ev.run };
       renderRun();
+      if (wasActive !== isActive(RUN)) renderFeed(); // rollback buttons appear/disappear
     } else if (ev.type === 'message') {
-      if (!RUN) return;
       if (!RUN.messages.some((m) => m.id === ev.message.id)) {
-        if (!RUN.messages.length) $('#feed').innerHTML = '';
         RUN.messages.push(ev.message);
         $('#feed').appendChild(msgEl(ev.message));
       }
-      if (ev.message.kind === 'agent' || ev.message.kind === 'test') {
-        const key = ev.message.kind === 'test' ? 'tests' : ev.message.agent;
-        live.get(key)?.remove(); live.delete(key);
-      }
-    } else if (ev.type === 'turn-start') liveStart(ev);
+    } else if (ev.type === 'turn-start') liveStart({ ...ev, startedAt: Date.now() });
     else if (ev.type === 'live') liveChunk(ev);
     toBottom(stick);
   };
-  es.onerror = () => { $('#statusText').textContent = '서버 연결 끊김 — 재연결 중…'; };
 }
 
+// ---------- init ----------
 async function init() {
   CFG = await api('config');
   $('#mockBadge').hidden = !CFG.mock;
+  $('#version').textContent = `v${CFG.version}`;
   restoreForm();
   renderAgents();
-  api('check').then(renderAgents).catch(() => {});
+  reloadChecks();
+  checkGithub();
   if (window.councilDesktop) {
     $('#pickDir').hidden = false;
-    $('#pickDir').onclick = async () => { const d = await window.councilDesktop.pickDir(); if (d) { $('#projectDir').value = d; saveForm(); } };
+    $('#pickDir').onclick = async () => { const d = await window.councilDesktop.pickDir(); if (d) { $('#projectDir').value = d; saveForm(); checkGithub(); } };
   }
   document.querySelectorAll('#modeSeg button').forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
   ['#moderator', '#worker', ...FIELDS.map((f) => '#' + f), ...CHECKS.map((c) => '#' + c)].forEach((s) => $(s).addEventListener('change', saveForm));
   $('#projectDir').addEventListener('change', checkGithub);
   $('#issueLoad').onclick = previewIssue;
   $('#issue').addEventListener('change', previewIssue);
-  $('#publishBtn').onclick = async () => { try { await api('publish', {}); } catch (err) { alert(err.message); } };
-  checkGithub();
+  $('#probeBtn').onclick = probe;
   $('#setup').addEventListener('submit', start);
-  $('#pauseBtn').onclick = () => api(RUN?.paused ? 'resume' : 'pause', {});
-  $('#finishBtn').onclick = () => api('stop', { hard: false });
-  $('#killBtn').onclick = () => { if (confirm('실행 중인 에이전트를 즉시 종료할까요?')) api('stop', { hard: true }); };
-  $('#newBtn').onclick = () => { $('#setup').hidden = false; $('#setup').scrollIntoView(); };
+  $('#newBtn').onclick = showNew;
+  $('#settingsBtn').onclick = openSettings;
+  $('#saveSecrets').onclick = saveSecretsNow;
+  $('#saveConfig').onclick = saveConfigNow;
+
+  const act = (name, body = {}) => api(name, { runId: SEL, ...body }).catch((e) => toast('error', e.message));
+  $('#pauseBtn').onclick = () => act(RUN?.status === 'paused' ? 'resume' : 'pause');
+  $('#finishBtn').onclick = () => act('stop', { hard: false });
+  $('#killBtn').onclick = () => { if (confirm('실행 중인 에이전트를 즉시 종료할까요?')) act('stop', { hard: true }); };
+  $('#continueBtn').onclick = () => act('continue');
+  $('#publishBtn').onclick = () => act('publish');
+  $('#deleteBtn').onclick = async () => {
+    if (!confirm('이 세션의 기록(.council/runs/…)을 삭제할까요? 프로젝트 코드와 git 커밋은 그대로입니다.')) return;
+    try { await api('forget', { runId: SEL }); showNew(); refreshSessions(); } catch (e) { toast('error', e.message); }
+  };
   $('#composer').addEventListener('submit', async (e) => {
     e.preventDefault();
     const t = $('#injectText').value.trim();
-    if (!t) return;
-    try { await api('inject', { text: t }); $('#injectText').value = ''; } catch (err) { alert(err.message); }
+    if (!t || !SEL) return;
+    try { await api('inject', { runId: SEL, text: t }); $('#injectText').value = ''; } catch (err) { toast('error', err.message); }
   });
   $('#injectText').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); }
   });
+  setInterval(renderSessions, 60000);
+
+  const last = load('sel');
+  if (last) select(last); else showNew();
   connect();
 }
-init();
+init().catch((e) => { document.body.innerHTML = `<pre style="padding:20px">${esc(e.stack || e.message)}</pre>`; });

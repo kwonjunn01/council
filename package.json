@@ -1,6 +1,6 @@
 {
   "name": "council",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Make Claude Code, Codex and Gemini CLI debate and build a project together",
   "main": "electron/main.js",
   "bin": {
@@ -94,5 +94,8 @@
     "publish": {
       "provider": "github"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

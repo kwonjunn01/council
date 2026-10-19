@@ -9,86 +9,125 @@
 </head>
 <body>
   <aside id="side">
-    <div class="brand"><img src="icon.png" alt=""> Council <span id="mockBadge" class="badge" hidden>MOCK</span></div>
-
-    <form id="setup">
-      <label>프로젝트 폴더
-        <div class="row"><input id="projectDir" placeholder="/Users/me/my-project" required><button type="button" id="pickDir" hidden>찾기</button></div>
-      </label>
-
-      <div class="seg" id="modeSeg">
-        <button type="button" data-mode="debate" class="on">💬 토론</button>
-        <button type="button" data-mode="develop">🛠 개발</button>
-      </div>
-      <p class="hint" id="modeHint"></p>
-
-      <label>주제 / 미션
-        <textarea id="topic" rows="6" placeholder="예) 이 저장소에 실시간 협업 편집 기능을 넣자. CRDT vs OT 중 무엇으로, 어떤 구조로?&#10;(GitHub 이슈를 지정하면 비워둬도 됩니다)"></textarea>
-      </label>
-
-      <fieldset>
-        <legend>참가자</legend>
-        <div id="agentsBox"></div>
-      </fieldset>
-
-      <div class="grid2">
-        <label>모더레이터<select id="moderator"></select></label>
-        <label class="dev-only">메인 워커<select id="worker"></select></label>
-      </div>
-
-      <div class="grid2">
-        <label>최대 라운드 <small>(0 = 무제한)</small><input id="maxRounds" type="number" min="0" value="6"></label>
-        <label class="dev-only">계획 토론 라운드<input id="planRounds" type="number" min="1" value="3"></label>
-        <label>응답 언어<input id="language" value="Korean"></label>
-      </div>
-
-      <label class="dev-only">테스트 명령 <small>(매 라운드 자동 실행, 선택)</small>
-        <input id="testCmd" placeholder="npm test / pytest -q / cargo test">
-      </label>
-
-      <fieldset id="ghBox">
-        <legend>🐙 GitHub</legend>
-        <div id="ghStatus" class="hint">프로젝트 폴더를 입력하면 저장소를 확인합니다.</div>
-        <label>이슈를 미션으로 <small>(#12 · owner/repo#12 · URL — 선택)</small>
-          <div class="row"><input id="issue" placeholder="#12"><button type="button" id="issueLoad">확인</button></div>
-        </label>
-        <div id="issuePreview" class="hint"></div>
-        <label class="check dev-only"><input type="checkbox" id="branch" checked> <span><b>세션 전용 브랜치</b> — <code>council/…</code> 브랜치에서 작업해 원래 브랜치 보호</span></label>
-        <label class="check"><input type="checkbox" id="publish"> <span><b>끝나면 GitHub에 게시</b> — 개발: push + PR 생성 · 토론: 이슈에 결론 코멘트</span></label>
-      </fieldset>
-
-      <label class="check"><input type="checkbox" id="relentless"> <span><b>무자비 모드</b> — 합의해도 멈추지 않고 합의안을 다시 공격·개선</span></label>
-      <label class="check"><input type="checkbox" id="blindOpening" checked> <span><b>블라인드 오프닝</b> — 1라운드는 서로 안 보고 독립 제안</span></label>
-
-      <button id="startBtn" class="primary" type="submit">시작</button>
-      <p id="err" class="err"></p>
-    </form>
-
-    <div id="controls" hidden>
-      <div class="status"><span id="statusDot"></span><span id="statusText"></span></div>
-      <div class="grid3">
-        <button id="pauseBtn">⏸ 일시정지</button>
-        <button id="finishBtn">🏁 마무리</button>
-        <button id="killBtn" class="danger">⛔ 중단</button>
-      </div>
-      <button id="publishBtn" class="ghost" hidden>🐙 GitHub에 게시</button>
-      <a id="publishedLink" target="_blank" hidden></a>
-      <button id="newBtn" class="ghost" hidden>＋ 새 세션</button>
+    <div class="brand">
+      <img src="icon.png" alt=""> <span>Council</span> <span id="mockBadge" class="badge" hidden>MOCK</span>
+      <button id="settingsBtn" class="icon-btn" title="설정 · API 키">⚙</button>
     </div>
+    <button id="newBtn" class="primary wide">＋ 새 세션</button>
+    <div id="sessionList"></div>
+    <div id="version" class="foot"></div>
   </aside>
 
   <main>
-    <header id="topbar"><div id="runTitle">세션 없음</div><div id="runMeta"></div></header>
-    <div id="scroller">
-      <div id="plan" hidden><details><summary>📋 합의된 계획 (PLAN.md)</summary><div class="md" id="planBody"></div></details></div>
-      <div id="feed"><div class="empty">왼쪽에서 프로젝트와 미션을 정하고 시작하세요.<br>세 에이전트가 서로의 결과를 비판하고 개선하며 끝까지 토론합니다.</div></div>
-      <div id="live"></div>
-    </div>
-    <form id="composer">
-      <textarea id="injectText" rows="2" placeholder="중재자로 끼어들기 — Enter 전송, Shift+Enter 줄바꿈. 끝난 세션에 보내면 이어서 계속합니다."></textarea>
-      <button class="primary">전송</button>
-    </form>
+    <!-- new session -->
+    <section id="setupView" class="view">
+      <form id="setup" class="debate">
+        <h2>새 세션</h2>
+        <div class="grid-main">
+          <div>
+            <label>프로젝트 폴더
+              <div class="row"><input id="projectDir" list="recentDirs" placeholder="C:\work\my-app  또는  ~/work/my-app" autocomplete="off"><button type="button" id="pickDir" hidden>찾기…</button></div>
+              <datalist id="recentDirs"></datalist>
+            </label>
+            <div id="ghStatus" class="hint"></div>
+
+            <div class="seg" id="modeSeg">
+              <button type="button" data-mode="debate" class="on">💬 토론</button>
+              <button type="button" data-mode="develop">🛠 개발</button>
+            </div>
+            <p class="hint" id="modeHint"></p>
+
+            <label>주제 / 미션
+              <textarea id="topic" rows="7" placeholder="예) 이 저장소에 실시간 협업 편집을 넣자. CRDT vs OT, 어떤 구조로?&#10;(GitHub 이슈를 지정하면 비워둬도 됩니다)"></textarea>
+            </label>
+
+            <fieldset>
+              <legend>🐙 GitHub</legend>
+              <label>이슈를 미션으로 <small>(#12 · owner/repo#12 · URL — 선택)</small>
+                <div class="row"><input id="issue" placeholder="#12"><button type="button" id="issueLoad">확인</button></div>
+              </label>
+              <div id="issuePreview" class="hint"></div>
+              <label class="check dev-only"><input type="checkbox" id="branch" checked> <span><b>세션 전용 브랜치</b> — <code>council/…</code>에서 작업, 원래 브랜치 보호</span></label>
+              <label class="check"><input type="checkbox" id="publish"> <span><b>끝나면 GitHub에 게시</b> — 개발: push + PR · 토론: 이슈에 결론 코멘트</span></label>
+            </fieldset>
+          </div>
+
+          <div>
+            <fieldset>
+              <legend>참가자</legend>
+              <div id="agentsBox"></div>
+              <button type="button" id="probeBtn" class="ghost">🔌 실제 호출 점검</button>
+              <div id="probeResult" class="hint"></div>
+            </fieldset>
+
+            <div class="grid2">
+              <label>모더레이터<select id="moderator"></select></label>
+              <label class="dev-only">메인 워커<select id="worker"></select></label>
+            </div>
+            <div class="grid3">
+              <label>최대 라운드 <small>0=무제한</small><input id="maxRounds" type="number" min="0" value="6"></label>
+              <label class="dev-only">계획 라운드<input id="planRounds" type="number" min="1" value="3"></label>
+              <label>응답 언어<input id="language" value="Korean"></label>
+            </div>
+            <label class="dev-only">테스트 명령 <small>(매 라운드 자동 실행)</small>
+              <input id="testCmd" placeholder="npm test · pytest -q · cargo test">
+            </label>
+            <label class="check"><input type="checkbox" id="relentless"> <span><b>무자비 모드</b> — 합의해도 멈추지 않고 합의안을 다시 공격·개선</span></label>
+            <label class="check"><input type="checkbox" id="blindOpening" checked> <span><b>블라인드 오프닝</b> — 1라운드는 서로 안 보고 독립 제안</span></label>
+            <button id="startBtn" class="primary wide big" type="submit">시작</button>
+            <p id="err" class="err"></p>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- session -->
+    <section id="runView" class="view" hidden>
+      <header id="topbar">
+        <div class="titlebar">
+          <span id="statusDot"></span>
+          <div id="runTitle"></div>
+          <div class="controls">
+            <button id="pauseBtn">⏸ 일시정지</button>
+            <button id="finishBtn" title="현재 턴이 끝나면 최종 보고서를 쓰고 종료">🏁 마무리</button>
+            <button id="killBtn" class="danger" title="실행 중인 에이전트를 즉시 종료">⛔ 중단</button>
+            <button id="continueBtn" class="primary">▶ 이어서 진행</button>
+            <button id="publishBtn">🐙 게시</button>
+            <button id="deleteBtn" class="danger" title="세션 기록 삭제">🗑</button>
+          </div>
+        </div>
+        <div id="runMeta"></div>
+        <div id="statusLine"></div>
+      </header>
+      <div id="scroller">
+        <div id="plan" hidden><details><summary>📋 합의된 계획 (PLAN.md)</summary><div class="md" id="planBody"></div></details></div>
+        <div id="feed"></div>
+        <div id="live"></div>
+      </div>
+      <form id="composer">
+        <textarea id="injectText" rows="2" placeholder="중재자로 끼어들기 — Enter 전송 · Shift+Enter 줄바꿈 · 끝난 세션에 보내면 이어서 진행"></textarea>
+        <button class="primary">전송</button>
+      </form>
+    </section>
   </main>
+
+  <dialog id="settings">
+    <form method="dialog" class="dlg">
+      <div class="dlg-head"><h3>⚙ 설정</h3><button value="close" class="icon-btn">✕</button></div>
+      <h4>API 키</h4>
+      <p class="hint">이 PC의 <code>~/.council/secrets.json</code>에만 저장됩니다 (본인만 읽기 가능). 저장한 값은 다시 표시되지 않습니다. 빈 칸은 기존 값 유지, <b>삭제</b> 체크 시 제거.</p>
+      <div id="secretsBox"></div>
+      <div class="row"><button type="button" id="saveSecrets" class="primary">키 저장</button><span id="secretsMsg" class="hint"></span></div>
+
+      <h4>고급 설정 <small><code id="configPath"></code></small></h4>
+      <p class="hint">기본값에서 바꿀 부분만 적으세요: 에이전트 명령(cmd), 인자(args), 모델, 페르소나, 타임아웃 등. 저장 전에 검증하고 이전 파일은 .bak으로 보관합니다.</p>
+      <textarea id="configText" rows="14" spellcheck="false"></textarea>
+      <div class="row"><button type="button" id="saveConfig" class="primary">저장 · 적용</button><span id="configMsg" class="hint"></span></div>
+      <details><summary>기본값 보기 (config.default.json)</summary><pre id="defaultsText"></pre></details>
+    </form>
+  </dialog>
+
+  <div id="toasts"></div>
   <script src="app.js"></script>
 </body>
 </html>

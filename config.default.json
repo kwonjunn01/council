@@ -11,14 +11,83 @@
       "enabled": true,
       "cmd": "claude",
       "args": {
-        "base": ["-p", "--output-format", "stream-json", "--verbose"],
-        "read": ["--allowedTools", "Read", "Grep", "Glob", "WebSearch", "WebFetch", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git status:*)"],
-        "write": ["--permission-mode", "bypassPermissions"],
+        "base": [
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose"
+        ],
+        "read": [
+          "--allowedTools",
+          "Read",
+          "Grep",
+          "Glob",
+          "WebSearch",
+          "WebFetch",
+          "Bash(git diff:*)",
+          "Bash(git log:*)",
+          "Bash(git status:*)"
+        ],
+        "write": [
+          "--permission-mode",
+          "bypassPermissions"
+        ],
         "tail": []
       },
       "input": "stdin",
       "parser": "claude-stream-json",
-      "role": "Architect & critic: design soundness, edge cases, correctness, long-term maintainability."
+      "role": "Architect & critic: design soundness, edge cases, correctness, long-term maintainability.",
+      "modelArgs": [
+        "--model",
+        "{model}"
+      ],
+      "model": ""
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "color": "#7c5cff",
+      "enabled": true,
+      "cmd": "claude",
+      "env": {
+        "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+        "ANTHROPIC_AUTH_TOKEN": "${DEEPSEEK_API_KEY}",
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_MODEL": "deepseek-chat",
+        "ANTHROPIC_SMALL_FAST_MODEL": "deepseek-chat",
+        "API_TIMEOUT_MS": "600000",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+      },
+      "args": {
+        "base": [
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose"
+        ],
+        "read": [
+          "--allowedTools",
+          "Read",
+          "Grep",
+          "Glob",
+          "Bash(git diff:*)",
+          "Bash(git log:*)",
+          "Bash(git status:*)"
+        ],
+        "write": [
+          "--permission-mode",
+          "bypassPermissions"
+        ],
+        "tail": []
+      },
+      "input": "stdin",
+      "parser": "claude-stream-json",
+      "role": "Main implementer: writes complete, working code fast; follows the agreed plan and the moderator's work order to the letter; runs the tests.",
+      "modelArgs": [
+        "--model",
+        "{model}"
+      ],
+      "model": "deepseek-chat",
+      "executor": true
     },
     "codex": {
       "label": "Codex",
@@ -26,15 +95,42 @@
       "enabled": true,
       "cmd": "codex",
       "args": {
-        "base": ["exec", "--skip-git-repo-check", "--color", "never", "--output-last-message", "{lastMessageFile}"],
-        "read": ["--sandbox", "read-only"],
-        "write": ["--full-auto"],
-        "tail": ["-"]
+        "base": [
+          "exec",
+          "--skip-git-repo-check",
+          "--ephemeral",
+          "--color",
+          "never",
+          "--output-last-message",
+          "{lastMessageFile}"
+        ],
+        "read": [
+          "--sandbox",
+          "read-only",
+          "-c",
+          "approval_policy=never"
+        ],
+        "write": [
+          "--sandbox",
+          "workspace-write",
+          "-c",
+          "approval_policy=never",
+          "-c",
+          "sandbox_workspace_write.network_access=true"
+        ],
+        "tail": [
+          "-"
+        ]
       },
       "input": "stdin",
       "parser": "text",
       "finalFrom": "lastMessageFile",
-      "role": "Pragmatic engineer: implementability, concrete code, tests, performance, shipping fast."
+      "role": "Rigorous code reviewer: correctness, tests, performance, security; runs the code to verify claims.",
+      "modelArgs": [
+        "-m",
+        "{model}"
+      ],
+      "model": ""
     },
     "gemini": {
       "label": "Gemini",
@@ -42,36 +138,43 @@
       "enabled": true,
       "cmd": "gemini",
       "args": {
-        "base": ["-p", "Follow the instructions provided on stdin exactly."],
-        "read": [],
-        "write": ["--yolo"],
+        "base": [
+          "-p",
+          "Follow the instructions provided on stdin exactly.",
+          "--skip-trust"
+        ],
+        "read": [
+          "--approval-mode",
+          "plan"
+        ],
+        "write": [
+          "--approval-mode",
+          "yolo"
+        ],
         "tail": []
       },
       "input": "stdin",
       "parser": "text",
-      "role": "Devil's advocate & researcher: challenge assumptions, bring alternatives, prior art and outside knowledge."
-    },
-    "deepseek": {
-      "label": "DeepSeek",
-      "color": "#7c5cff",
-      "enabled": false,
-      "cmd": "claude",
-      "env": {
-        "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
-        "ANTHROPIC_AUTH_TOKEN": "${DEEPSEEK_API_KEY}",
-        "ANTHROPIC_API_KEY": "",
-        "ANTHROPIC_MODEL": "deepseek-chat",
-        "ANTHROPIC_SMALL_FAST_MODEL": "deepseek-chat"
-      },
-      "args": {
-        "base": ["-p", "--output-format", "stream-json", "--verbose"],
-        "read": ["--allowedTools", "Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git status:*)"],
-        "write": ["--permission-mode", "bypassPermissions"],
-        "tail": []
-      },
-      "input": "stdin",
-      "parser": "claude-stream-json",
-      "role": "Cost-efficient workhorse: high-volume implementation and exhaustive line-by-line review."
+      "role": "Devil's advocate & researcher: challenge assumptions, bring alternatives, prior art and outside knowledge.",
+      "modelArgs": [
+        "-m",
+        "{model}"
+      ],
+      "model": ""
     }
-  }
+  },
+  "preflight": true,
+  "limitBackoffSec": [
+    60,
+    180,
+    600,
+    1200,
+    1800
+  ],
+  "networkRetrySec": [
+    10,
+    30,
+    60
+  ],
+  "maxConcurrentSessions": 4
 }
