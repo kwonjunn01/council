@@ -3,6 +3,10 @@
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) · 버전: [SemVer](https://semver.org/lang/ko/)
 
 ## [Unreleased]
+### Added
+- 새 세션 화면에 GitHub 저장소 칸(프로젝트 폴더 칸과 별도). 빈 폴더·새 경로면 시작할 때 복제, origin 없는 git 폴더면 연결, 다른 저장소면 시작을 막고 알려줌. 폴더 칸을 비우면 `~/council-projects/<저장소>`에 복제. 이슈 링크를 넣으면 그 이슈가 미션. 입력하면 바로 무엇을 할지 미리 보여줌
+### Fixed
+- 프로젝트 폴더를 `~/...`로 적으면 GitHub 상태 확인이 실패하던 문제
 
 ## [0.5.1] - 2026-10-19
 ### Changed

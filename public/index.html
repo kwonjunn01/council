@@ -25,11 +25,15 @@
         <h2>새 세션</h2>
         <div class="grid-main">
           <div>
-            <label>프로젝트 폴더
+            <label>프로젝트 폴더 <small>(GitHub 저장소만 적으면 비워둬도 됨)</small>
               <div class="row"><input id="projectDir" list="recentDirs" placeholder="C:\work\my-app  또는  ~/work/my-app" autocomplete="off"><button type="button" id="pickDir" hidden>찾기…</button></div>
               <datalist id="recentDirs"></datalist>
             </label>
             <div id="ghStatus" class="hint"></div>
+            <label>GitHub 저장소 <small>(선택 · URL 또는 owner/repo)</small>
+              <input id="repo" placeholder="https://github.com/owner/repo" autocomplete="off" spellcheck="false">
+            </label>
+            <div id="repoStatus" class="hint"></div>
 
             <div class="seg" id="modeSeg">
               <button type="button" data-mode="auto" class="on">🤖 자동</button>

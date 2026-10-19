@@ -2,6 +2,7 @@
 'use strict';
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { loadConfig, expandEnv, readUserConfig, saveUserConfig, saveSecrets, requiredSecrets, secretValue } = require('./lib/config');
@@ -76,7 +77,14 @@ function createServer({ mock = false } = {}) {
     forget: (b) => { council.forget(String(b.runId)); return { ok: true }; },
     preflight: (b) => council.preflight(b),
     github: (q) => GH.status(q.projectDir || process.cwd()),
-    issue: (q) => GH.fetchIssue(q.projectDir || process.cwd(), q.ref),
+    repo: (q) => GH.previewRepo(String(q.projectDir || '').trim(), q.repo),
+    issue: (q) => {
+      // "#12" means an issue of the repository typed in the GitHub field, even before the folder exists.
+      const spec = GH.parseRepo(q.repo);
+      const ref = spec?.slug && /^#?\d+$/.test(String(q.ref).trim()) ? `${spec.slug}#${String(q.ref).trim().replace('#', '')}` : q.ref;
+      const dir = String(q.projectDir || '').trim().replace(/^~(?=$|[\\/])/, os.homedir());
+      return GH.fetchIssue(dir && fs.existsSync(dir) ? dir : os.homedir(), ref);
+    },
     // Values are write-only: the UI only learns whether each key is set.
     install: (b) => {
       const a = config.agents[b.agent];

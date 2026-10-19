@@ -266,7 +266,7 @@ function setMode(m) {
   if (CFG) renderAgents(); // each mode remembers its own line-up
 }
 
-const FIELDS = ['projectDir', 'topic', 'maxRounds', 'planRounds', 'language', 'testCmd', 'issue'];
+const FIELDS = ['projectDir', 'repo', 'topic', 'maxRounds', 'planRounds', 'language', 'testCmd', 'issue'];
 const CHECKS = ['relentless', 'blindOpening', 'branch', 'publish'];
 function formAgents() {
   const out = {};
@@ -305,9 +305,10 @@ async function start(e) {
   const roles = {}, models = {}, efforts = {};
   for (const [id, a] of Object.entries(ag)) { roles[id] = a.role; models[id] = a.model; efforts[id] = a.effort; }
   $('#startBtn').disabled = true;
+  if ($('#repo').value.trim()) { $('#repoStatus').className = 'hint'; $('#repoStatus').textContent = '저장소 준비 중(복제·연결)…'; }
   try {
     const { id } = await api('start', {
-      projectDir: $('#projectDir').value, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles, models, efforts,
+      projectDir: $('#projectDir').value, repo: $('#repo').value, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles, models, efforts,
       moderator: $('#moderator').value, worker: $('#worker').value,
       maxRounds: $('#maxRounds').value, planRounds: $('#planRounds').value, language: $('#language').value,
       testCmd: $('#testCmd').value, relentless: $('#relentless').checked, blindOpening: $('#blindOpening').checked,
@@ -319,7 +320,7 @@ async function start(e) {
     refreshSessions();
     await select(id);
   } catch (err) { $('#err').textContent = err.message; }
-  finally { $('#startBtn').disabled = false; }
+  finally { $('#startBtn').disabled = false; checkGithub(); }
 }
 
 async function probe() {
@@ -344,12 +345,18 @@ async function probe() {
 }
 
 async function checkGithub() {
+  checkRepo();
   const dir = $('#projectDir').value.trim();
   const el = $('#ghStatus');
   if (!dir) { el.className = 'hint'; el.textContent = ''; return; }
   el.className = 'hint'; el.textContent = '저장소 확인 중…';
   try {
     const g = await api('github?projectDir=' + encodeURIComponent(dir));
+    if (g.missing) {
+      el.className = 'hint';
+      el.textContent = $('#repo').value.trim() ? '· 새 폴더 — 시작할 때 아래 GitHub 저장소를 여기에 복제합니다' : '⚠ 폴더가 없습니다 — GitHub 저장소를 적으면 여기에 복제합니다';
+      return;
+    }
     const parts = [];
     let ok = true;
     if (!g.git) { parts.push('git 저장소 아님 — 개발 모드는 git init 권장 (체크포인트·되돌리기·PR)'); ok = false; }
@@ -362,13 +369,35 @@ async function checkGithub() {
   } catch (err) { el.className = 'hint bad'; el.textContent = err.message; }
 }
 
+// What will happen to the folder when the session starts with this repository.
+async function checkRepo() {
+  const repo = $('#repo').value.trim();
+  const el = $('#repoStatus');
+  if (!repo) { el.className = 'hint'; el.textContent = ''; return; }
+  el.className = 'hint'; el.textContent = 'GitHub 저장소 확인 중…';
+  try {
+    const p = await api(`repo?projectDir=${encodeURIComponent($('#projectDir').value.trim())}&repo=${encodeURIComponent(repo)}`);
+    if (!p) { el.textContent = ''; return; }
+    const what = {
+      clone: `시작할 때 ${p.dir} 에 복제합니다`,
+      link: '이 폴더에 origin으로 연결합니다',
+      same: '이 폴더의 origin과 같은 저장소입니다',
+    }[p.plan.action];
+    const info = p.info ? `${p.info.nameWithOwner}${p.info.isPrivate ? ' (비공개)' : ''}` : p.label;
+    if (p.plan.action === 'blocked') { el.className = 'hint bad'; el.textContent = `⚠ ${p.plan.reason}`; return; }
+    if (p.infoError) { el.className = 'hint bad'; el.textContent = `⚠ ${p.label}에 접근할 수 없습니다 — 주소나 gh 로그인을 확인하세요 (${p.infoError})`; return; }
+    el.className = 'hint ok';
+    el.textContent = `✓ ${info} · ${what}${p.issue && !$('#issue').value.trim() ? ` · 이슈 #${p.issue}를 미션으로 씁니다` : ''}`;
+  } catch (err) { el.className = 'hint bad'; el.textContent = err.message; }
+}
+
 async function previewIssue() {
   const ref = $('#issue').value.trim();
   const el = $('#issuePreview');
   if (!ref) { el.textContent = ''; return; }
   el.className = 'hint'; el.textContent = '이슈 불러오는 중…';
   try {
-    const i = await api(`issue?projectDir=${encodeURIComponent($('#projectDir').value.trim())}&ref=${encodeURIComponent(ref)}`);
+    const i = await api(`issue?projectDir=${encodeURIComponent($('#projectDir').value.trim())}&repo=${encodeURIComponent($('#repo').value.trim())}&ref=${encodeURIComponent(ref)}`);
     el.className = 'hint ok'; el.textContent = `✓ #${i.number} ${i.title}`;
   } catch (err) { el.className = 'hint bad'; el.textContent = err.message; }
 }
@@ -631,6 +660,7 @@ async function init() {
   document.querySelectorAll('#modeSeg button').forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
   ['#moderator', '#worker', ...FIELDS.map((f) => '#' + f), ...CHECKS.map((c) => '#' + c)].forEach((s) => $(s).addEventListener('change', saveForm));
   $('#projectDir').addEventListener('change', checkGithub);
+  $('#repo').addEventListener('change', checkGithub);
   $('#issueLoad').onclick = previewIssue;
   $('#issue').addEventListener('change', previewIssue);
   $('#probeBtn').onclick = probe;

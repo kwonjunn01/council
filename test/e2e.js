@@ -204,6 +204,29 @@ async function main() {
   assert.ok(list.some((x) => x.id === idA) && list.some((x) => x.id === idB));
   console.log('✓ concurrent sessions');
 
+  // 3b. GitHub field: a new folder gets the repository cloned, a git folder without origin gets linked, another origin is refused
+  const src = tempRepo('upstream');
+  const bareHome = fs.mkdtempSync(path.join(os.tmpdir(), 'council-bare-'));
+  temps.push(bareHome);
+  const bare = path.join(bareHome, 'proj.git');
+  git(bareHome, 'clone', '-q', '--bare', src, bare);
+  const target = path.join(bareHome, 'work', 'proj');
+  id = await c.start({ projectDir: target, repo: bare, mode: 'debate', topic: 'clone', agents: ['claude'], maxRounds: 1 });
+  s = await c.waitDone(id);
+  assert.ok(fs.existsSync(path.join(target, 'README.md')), 'the repository should be cloned into the new folder');
+  assert.strictEqual(git(target, 'remote', 'get-url', 'origin'), bare);
+  assert.match(sysText(s), /복제했습니다/);
+  const linked = tempRepo('link');
+  id = await c.start({ projectDir: linked, repo: bare, mode: 'debate', topic: 'link', agents: ['claude'], maxRounds: 1 });
+  await c.waitDone(id);
+  assert.strictEqual(git(linked, 'remote', 'get-url', 'origin'), bare);
+  const other = tempRepo('other');
+  git(other, 'remote', 'add', 'origin', 'https://github.com/someone/else.git');
+  const refused = await c.post('start', { projectDir: other, repo: bare, mode: 'debate', topic: 'x', agents: ['claude'] });
+  assert.strictEqual(refused.status, 400);
+  assert.match(refused.json.error, /다릅니다/);
+  console.log('✓ GitHub field: clone into a new folder, link origin, refuse another origin');
+
   // 4. failure drills: Gemini hits a usage limit, Codex has a network blip while implementing
   // maxRounds is generous: rounds keep going without consensus until Gemini's cooldown ends, however fast the machine.
   process.env.COUNCIL_MOCK_FAIL = 'gemini:limit:1:review,codex:network:1:implement';
