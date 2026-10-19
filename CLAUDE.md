@@ -26,11 +26,10 @@ Claude(모더레이터) · Codex · Gemini가 토론·계획·리뷰하고 DeepS
 - 사용자에게 보이는 문구는 한국어, 코드·주석·커밋 메시지는 영어
 - 에이전트 CLI 인자를 바꾸면 실제 CLI로 `--help` 확인 후 앱의 "🔌 실제 호출 점검"으로 검증한다
 
-## 이어서 할 일 (2026-10-19 로컬 세션 기준)
-완료: main push + CI(Win/Mac/Linux) 통과, Claude·Codex·DeepSeek 실제 호출 점검, 실제 모델 자동 모드 세션(토론 → `NEXT: BUILD` → 계획 → DeepSeek 구현 → 테스트 통과 → 합의), `v0.5.0` 태그 → Release 워크플로가 설치 파일 생성
-
-남은 것:
-1. Gemini CLI 로그인(`gemini` 실행) 후 "🔌 실제 호출 점검"으로 4개 모두 확인
-2. `v0.5.0` 릴리스가 Draft로 생성됨(electron-builder 기본값). 공개해야 자동 업데이트가 동작한다. 앞으로 바로 공개하려면 `package.json` build.publish에 `"releaseType": "release"` 추가 검토
-3. 실제 모델로 `ASK OWNER`·`ASSIGN`은 아직 관찰하지 못했다(작은 과제라 나오지 않음)
-4. Actions의 `actions/checkout@v4`·`setup-node@v4`가 Node 20 지원 종료 경고를 낸다. v5로 올리기 검토
+## 이어서 할 일 (2026-10-19 로컬 세션 기준, v0.5.1 공개됨)
+- Gemini는 `agy`(Gemini CLI)로 호출한다. 읽기 턴 `--mode plan`, 쓰기 턴 `--dangerously-skip-permissions`. 쓰기 턴은 아직 실제로 검증하지 못했다
+- agy는 답을 낸 뒤 종료하지 않고 멈출 때가 있어 runner가 result 이벤트 후 5초 뒤 강제 종료한다(`exitGraceSec`)
+- Claude 턴이 느리다(모더레이터 요약 2~12분). 생각 깊이 기본값 조정 검토
+- 실제 모델로 `ASSIGN`(Opus 투입)은 아직 관찰하지 못했다
+- Actions의 `actions/checkout@v4`·`setup-node@v4` Node 20 지원 종료 경고 → v5로 올리기 검토
+- `v0.5.0` 릴리스는 Draft로 남아 있다(0.5.1이 최신)
