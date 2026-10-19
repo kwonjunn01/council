@@ -16,7 +16,7 @@ Claude(모더레이터) · Codex · Gemini가 토론·계획·리뷰하고 DeepS
 - `config.default.json`: 에이전트별 cmd/args/model/effort 정의. CLI가 바뀌면 여기부터 고친다
 
 ## 명령
-- `npm test`: 가짜 에이전트로 e2e 18개 시나리오. 변경 후 반드시 통과시킬 것
+- `npm test`: 가짜 에이전트로 e2e 21개 시나리오. 변경 후 반드시 통과시킬 것
 - `npm start` / `npm run mock` / `npm run desktop` (우분투 24.04에서 샌드박스 오류 시 `npx electron . --no-sandbox`)
 - `npm run dist:linux` / `npm run dist:win`: 설치 파일 빌드
 - 릴리스 절차는 `RELEASING.md`, 변경 기록은 `CHANGELOG.md` (`[Unreleased]`에 먼저 적는다)

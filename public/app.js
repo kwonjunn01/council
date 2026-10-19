@@ -387,6 +387,7 @@ async function checkRepo() {
     const what = {
       clone: `시작할 때 ${p.dir} 에 복제합니다`,
       link: '이 폴더에 origin으로 연결합니다',
+      init: '이 폴더를 git 저장소로 만들고 origin으로 연결합니다 (파일은 그대로)',
       same: '이 폴더의 origin과 같은 저장소입니다',
     }[p.plan.action];
     const info = p.info ? `${p.info.nameWithOwner}${p.info.isPrivate ? ' (비공개)' : ''}` : p.label;

@@ -143,7 +143,7 @@ Claude Code · Codex · Gemini CLI가 계획을 놓고 싸우고 서로의 결�
 ## 개발
 
 ```bash
-npm test          # 가짜 에이전트로 18개 시나리오 e2e (한도·네트워크·인증 실패, 동시 실행, 크래시 복구, 되돌리기 …)
+npm test          # 가짜 에이전트로 21개 시나리오 e2e (한도·네트워크·인증 실패, 동시 실행, 크래시 복구, 되돌리기 …)
 npm run dist:win  # Windows 설치 파일 (Linux/macOS에서도 빌드됨)
 git tag v0.3.0 && git push --tags   # GitHub Actions가 Win/Mac/Linux 설치 파일을 Releases에 업로드
 ```

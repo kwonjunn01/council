@@ -216,7 +216,7 @@
       },
       "input": "agy-json",
       "parser": "agy-stream-json",
-      "readNote": "Note: in this turn shell commands are blocked, and trying one ends your turn with no answer. Use only file viewing and search tools, then write your answer.",
+      "readNote": "Note: in this turn shell commands and web/URL fetching are blocked, and trying one ends your turn with no answer. Use only file viewing and search tools, answer from your own knowledge, then write your answer.",
       "role": "통찰력 있는 현인: 기술 세부보다 세상과 사람, 역사와 맥락을 넓게 이해한다. '왜 하는가', '실제 사람들에게 무슨 의미인가'를 묻고, 다른 분야의 선행 사례와 비유로 모두가 놓친 큰 그림과 숨은 전제를 짚는다.",
       "modelArgs": [
         "--model",
@@ -264,5 +264,6 @@
   "escalationOrder": [
     "claude"
   ],
-  "escalateAfterFailedTests": 2
+  "escalateAfterFailedTests": 2,
+  "minBuildRounds": 4
 }

@@ -149,6 +149,20 @@ async function main() {
   assert.ok(!phases(s).some((x) => x.endsWith(':implement')), 'TALK must not build');
   console.log('✓ auto mode: talk only');
 
+  // 1d'. a long debate must not eat the build: rounds are topped up, and a plain folder becomes a repository with a first commit
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'council-plain-'));
+  temps.push(plain);
+  fs.writeFileSync(path.join(plain, 'idea.md'), '# idea\n');
+  id = await c.start({ projectDir: plain, mode: 'auto', topic: '문서대로 만들어줘', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 3 });
+  s = await c.waitDone(id);
+  const autoText = sysText(s);
+  assert.match(autoText, /최대 라운드를 3 → 8로 늘립니다/, autoText);
+  assert.ok(s.messages.some((m) => m.phase === 'implement' && m.agent === 'deepseek' && m.ok), 'the worker must get to build');
+  assert.match(autoText, /git 저장소가 없어 새로 만들고/);
+  assert.match(git(plain, 'log', '--format=%s', '--reverse').split('\n')[0], /snapshot before the session/);
+  assert.ok(git(plain, 'log', '--format=%s').includes('council R'), 'worker turns are checkpointed');
+  console.log('✓ auto mode: build rounds guaranteed, plain folder gets git');
+
   // 1e. the moderator assigns a stronger model for one round, then work returns to DeepSeek
   Object.assign(process.env, { COUNCIL_MOCK_ASSIGN: 'Claude', COUNCIL_MOCK_ASSIGN_ROUND: '2' });
   id = await c.start({ projectDir: tempRepo('assign'), mode: 'develop', topic: 'assign drill', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 8, planRounds: 1 });
@@ -220,12 +234,19 @@ async function main() {
   id = await c.start({ projectDir: linked, repo: bare, mode: 'debate', topic: 'link', agents: ['claude'], maxRounds: 1 });
   await c.waitDone(id);
   assert.strictEqual(git(linked, 'remote', 'get-url', 'origin'), bare);
+  const docs = fs.mkdtempSync(path.join(os.tmpdir(), 'council-docs-'));
+  temps.push(docs);
+  fs.writeFileSync(path.join(docs, 'plan.md'), '# plan\n');
+  id = await c.start({ projectDir: docs, repo: bare, mode: 'debate', topic: 'docs', agents: ['claude'], maxRounds: 1 });
+  await c.waitDone(id);
+  assert.strictEqual(git(docs, 'remote', 'get-url', 'origin'), bare, 'a plain folder with files becomes a repository linked to origin');
+  assert.ok(fs.existsSync(path.join(docs, 'plan.md')));
   const other = tempRepo('other');
   git(other, 'remote', 'add', 'origin', 'https://github.com/someone/else.git');
   const refused = await c.post('start', { projectDir: other, repo: bare, mode: 'debate', topic: 'x', agents: ['claude'] });
   assert.strictEqual(refused.status, 400);
   assert.match(refused.json.error, /다릅니다/);
-  console.log('✓ GitHub field: clone into a new folder, link origin, refuse another origin');
+  console.log('✓ GitHub field: clone into a new folder, link origin, init a plain folder, refuse another origin');
 
   // 3c. a blocked command becomes one request; once the owner allows it, later read turns may run it
   process.env.COUNCIL_MOCK_DENY = 'claude:npm run lint';
