@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-19
+### Added
+- 원클릭 설치 스크립트 `council-setup.sh` (Ubuntu): Node·git·AI CLI 3종·앱 설치, GitHub 업로드(선택), 앱 실행
+- 앱 안에서 바로 고치기: CLI 미설치 시 [설치], 로그인 필요 시 [로그인], 키 없을 때 [키 설정] 버튼 (터미널 창을 열어 처리)
+- Ubuntu용 .deb / AppImage 패키지, 프로그램 메뉴 등록
+### Changed
+- 페르소나 기본값과 투표 표시(동의/계속)를 한국어로
+
 ## [0.3.0] - 2026-10-19
 ### Added
 - 역할 구성: Claude 모더레이터 · Codex/Gemini 토론·리뷰 · DeepSeek 전담 구현(계획 토론에는 불참). DeepSeek 장애 시 Codex가 대신 구현

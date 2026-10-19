@@ -1,6 +1,6 @@
 {
   "name": "council",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Make Claude Code, Codex and Gemini CLI debate and build a project together",
   "main": "electron/main.js",
   "bin": {
@@ -45,7 +45,8 @@
       "mock/**",
       "build/icon.*",
       "config.default.json",
-      "package.json"
+      "package.json",
+      "!council-setup.sh"
     ],
     "win": {
       "target": [
@@ -85,16 +86,32 @@
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        "deb",
+        "AppImage"
       ],
       "icon": "build/icon.png",
-      "category": "Development"
+      "category": "Development",
+      "executableName": "council",
+      "desktop": {
+        "entry": {
+          "Name": "Council",
+          "Comment": "Claude · Codex · Gemini 토론 + DeepSeek 구현",
+          "Keywords": "AI;Claude;Codex;Gemini;DeepSeek;"
+        }
+      }
     },
     "publish": {
       "provider": "github",
       "owner": "kwonjunn01",
       "repo": "council"
+    },
+    "deb": {
+      "depends": [
+        "git"
+      ],
+      "recommends": [
+        "nodejs"
+      ]
     }
   },
   "dependencies": {

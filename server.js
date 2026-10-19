@@ -8,11 +8,12 @@ const { loadConfig, expandEnv, readUserConfig, saveUserConfig, saveSecrets, requ
 const { Council } = require('./lib/council');
 const GH = require('./lib/github');
 const { setupLogging } = require('./lib/log');
+const { openTerminal, installScript } = require('./lib/terminal');
 const pkg = require('./package.json');
 
 const PUB = path.join(__dirname, 'public');
 const MIME = { '.png': 'image/png', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
-const POST_ONLY = new Set(['start', 'stop', 'pause', 'resume', 'inject', 'publish', 'continue', 'rollback', 'forget', 'settings', 'preflight', 'secrets']);
+const POST_ONLY = new Set(['install', 'login', 'start', 'stop', 'pause', 'resume', 'inject', 'publish', 'continue', 'rollback', 'forget', 'settings', 'preflight', 'secrets']);
 
 function readJson(req) {
   return new Promise((resolve, reject) => {
@@ -50,7 +51,7 @@ function createServer({ mock = false } = {}) {
     config: () => ({
       version: pkg.version, language: config.language, mock, platform: process.platform,
       agents: Object.fromEntries(Object.entries(config.agents).map(([id, a]) =>
-        [id, { label: a.label, color: a.color, role: a.role, enabled: a.enabled !== false, executor: !!a.executor, cmd: a.cmd, model: a.model || '', hasModel: !!a.modelArgs }])),
+        [id, { label: a.label, color: a.color, role: a.role, enabled: a.enabled !== false, executor: !!a.executor, cmd: a.cmd, model: a.model || '', hasModel: !!a.modelArgs, setup: a.setup || null }])),
     }),
     check: async () => Object.fromEntries(await Promise.all(Object.entries(config.agents).map(async ([id, a]) => {
       const r = await checkAgent(a);
@@ -75,6 +76,19 @@ function createServer({ mock = false } = {}) {
     github: (q) => GH.status(q.projectDir || process.cwd()),
     issue: (q) => GH.fetchIssue(q.projectDir || process.cwd(), q.ref),
     // Values are write-only: the UI only learns whether each key is set.
+    install: (b) => {
+      const a = config.agents[b.agent];
+      if (!a?.setup?.npm) throw new Error('자동 설치를 지원하지 않는 에이전트입니다.');
+      openTerminal(`${a.label} 설치`, installScript(a.setup.npm));
+      return { ok: true };
+    },
+    login: (b) => {
+      const a = config.agents[b.agent];
+      if (!a?.setup?.login) throw new Error('이 에이전트는 로그인 대신 API 키를 씁니다 (⚙ 설정).');
+      const hint = process.platform === 'win32' ? '' : 'echo "로그인을 마치면 /exit 또는 Ctrl+C로 빠져나오세요."\n';
+      openTerminal(`${a.label} 로그인`, `${hint}${a.setup.login}`);
+      return { ok: true };
+    },
     secrets: (b) => { if (b.values) { saveSecrets(b.values); broadcast({ type: 'config' }); } return requiredSecrets(config); },
     settings: (b) => {
       if (b.text === undefined) return readUserConfig();

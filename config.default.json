@@ -41,7 +41,11 @@
         "--model",
         "{model}"
       ],
-      "model": ""
+      "model": "",
+      "setup": {
+        "npm": "@anthropic-ai/claude-code",
+        "login": "claude"
+      }
     },
     "deepseek": {
       "label": "DeepSeek",
@@ -87,7 +91,11 @@
         "{model}"
       ],
       "model": "deepseek-chat",
-      "executor": true
+      "executor": true,
+      "setup": {
+        "npm": "@anthropic-ai/claude-code",
+        "key": "DEEPSEEK_API_KEY"
+      }
     },
     "codex": {
       "label": "Codex",
@@ -130,7 +138,11 @@
         "-m",
         "{model}"
       ],
-      "model": ""
+      "model": "",
+      "setup": {
+        "npm": "@openai/codex",
+        "login": "codex login"
+      }
     },
     "gemini": {
       "label": "Gemini",
@@ -160,7 +172,11 @@
         "-m",
         "{model}"
       ],
-      "model": ""
+      "model": "",
+      "setup": {
+        "npm": "@google/gemini-cli",
+        "login": "gemini"
+      }
     }
   },
   "preflight": true,

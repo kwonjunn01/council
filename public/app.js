@@ -12,7 +12,7 @@ const MODE_HINT = {
   develop: '① 워커를 뺀 나머지가 블라인드 계획 → 계획 토론 → PLAN.md 확정  ② 워커가 구현 → git 체크포인트 → 테스트 → 리뷰어 비판 → 모더레이터 작업 지시 → 반복. 워커가 막히면 다른 모델이 대신 구현.',
 };
 
-let CFG = null, SESSIONS = [], SEL = null, RUN = null, CHECK = {}, MODE = 'debate';
+let CFG = null, SESSIONS = [], SEL = null, RUN = null, CHECK = {}, PROBE = {}, MODE = 'debate';
 const live = new Map();
 
 // ---------- utils ----------
@@ -156,7 +156,7 @@ function renderAgents() {
         <span class="dot ${st ? (st.ok ? 'ok' : 'bad') : ''}"></span>
         <span class="name" style="color:${a.color}">${esc(a.label)}</span>
         <span class="ver ${st && !st.ok ? 'bad' : ''}" title="${esc(st ? (st.ok ? st.version : st.error) : '')}">${esc(st ? (st.ok ? st.version : st.error) : '확인 중…')}</span>
-        ${st?.needsKey ? '<button type="button" class="keylink">키 설정</button>' : ''}</div>
+        ${fixButtons(id, a, st)}</div>
       <div class="sub">
         <input data-model="${id}" placeholder="${a.hasModel ? '모델 (기본값)' : '모델 지정 불가'}" value="${esc(saved[id]?.model ?? a.model ?? '')}" ${a.hasModel ? '' : 'disabled'}>
         <input data-cmd="${id}" value="${esc(a.cmd)}" disabled title="명령은 ⚙ 설정에서 변경">
@@ -165,12 +165,32 @@ function renderAgents() {
     box.appendChild(el);
   }
   box.querySelectorAll('.keylink').forEach((b) => { b.onclick = openSettings; });
+  box.querySelectorAll('[data-install]').forEach((b) => { b.onclick = () => runFix('install', b.dataset.install); });
+  box.querySelectorAll('[data-login]').forEach((b) => { b.onclick = () => runFix('login', b.dataset.login); });
   box.querySelectorAll('input[type=checkbox]').forEach((x) => x.addEventListener('change', () => {
     x.closest('.agent').classList.toggle('off', !x.checked);
     saveForm(); fillRoleSelects();
   }));
   box.querySelectorAll('[data-model],[data-role]').forEach((x) => x.addEventListener('change', saveForm));
   fillRoleSelects();
+}
+
+// One-click fixes next to each agent: install the CLI, log in, or set the API key.
+function fixButtons(id, a, st) {
+  const out = [];
+  if (st && !st.ok && /설치 안 됨/.test(st.error) && a.setup?.npm) out.push(`<button type="button" class="keylink" data-install="${id}">⬇ 설치</button>`);
+  if (st?.needsKey) out.push('<button type="button" class="keylink">🔑 키 설정</button>');
+  if (PROBE[id] && !PROBE[id].ok && PROBE[id].kind === 'auth' && a.setup?.login) out.push(`<button type="button" class="keylink" data-login="${id}">🔐 로그인</button>`);
+  return out.join(' ');
+}
+
+async function runFix(kind, id) {
+  try {
+    await api(kind, { agent: id });
+    toast('ok', `${agentLabel(id)} ${kind === 'install' ? '설치' : '로그인'} 창을 열었습니다`, '끝나면 이 화면으로 돌아오세요. 자동으로 다시 확인합니다.');
+    const recheck = () => { window.removeEventListener('focus', recheck); reloadChecks(); if (kind === 'login') probe(); };
+    window.addEventListener('focus', recheck);
+  } catch (e) { toast('error', e.message); }
 }
 
 const selectedAgents = () => [...document.querySelectorAll('#agentsBox input[type=checkbox]:checked')].map((x) => x.dataset.id);
@@ -254,6 +274,8 @@ async function probe() {
   const models = Object.fromEntries(Object.entries(formAgents()).map(([k, v]) => [k, v.model]));
   try {
     const res = await api('preflight', { agents: ids, models });
+    PROBE = { ...PROBE, ...res };
+    renderAgents();
     const lines = Object.entries(res).map(([id, r]) => r.ok ? `✅ ${agentLabel(id)} — ${(r.ms / 1000).toFixed(1)}s` : `❌ ${agentLabel(id)} — ${r.hint}\n   ${r.detail.split('\n').pop()}`);
     const allOk = Object.values(res).every((r) => r.ok);
     $('#probeResult').className = 'hint ' + (allOk ? 'ok' : 'bad');
