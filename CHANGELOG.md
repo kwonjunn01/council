@@ -3,6 +3,8 @@
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) · 버전: [SemVer](https://semver.org/lang/ko/)
 
 ## [Unreleased]
+
+## [0.5.1] - 2026-10-19
 ### Changed
 - Gemini를 새 Gemini CLI `agy`로 호출(기존 `gemini` 명령 대신). 로그인은 `agy`, 모델 목록은 `agy models`에서 Gemini 모델만 자동으로 불러오고 생각 깊이(낮음·보통·높음)를 고를 수 있음
 - 기본 페르소나: Claude는 기술과 큰 그림 사이의 균형 잡힌 중재자, Codex는 문자 그대로 받아들이고 디테일에 집요한 기술 장인, Gemini는 세상과 사람을 넓게 이해하는 통찰력 있는 현인
