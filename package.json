@@ -1,0 +1,18 @@
+{
+  "name": "council",
+  "version": "0.1.0",
+  "description": "Make Claude Code, Codex and Gemini CLI debate and build a project together",
+  "main": "electron/main.js",
+  "bin": { "council": "server.js" },
+  "scripts": {
+    "start": "node server.js",
+    "mock": "node server.js --mock",
+    "desktop": "electron .",
+    "desktop:mock": "electron . --mock"
+  },
+  "engines": { "node": ">=18" },
+  "devDependencies": {
+    "electron": "^33.2.1"
+  },
+  "license": "MIT"
+}

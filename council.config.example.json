@@ -1,0 +1,7 @@
+{
+  "language": "Korean",
+  "agents": {
+    "deepseek": { "enabled": true },
+    "gemini": { "role": "Security & scale red-teamer: assume everything will be attacked and 100x the load." }
+  }
+}
