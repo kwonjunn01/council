@@ -106,7 +106,8 @@ async function main() {
   assert.strictEqual(s.status, 'done', sysText(s));
   assert.ok(!q.some((x) => /^deepseek:(plan|plan-debate|plan-brief|review|work-order)$/.test(x)), `deepseek must only execute: ${q.join(', ')}`);
   assert.ok(q.includes('deepseek:implement') && q.includes('codex:review') && q.includes('gemini:review') && q.includes('claude:work-order'), q.join(', '));
-  assert.ok(['claude:plan', 'codex:plan', 'gemini:plan'].every((x) => q.includes(x)), 'the three should plan');
+  assert.ok(['codex:plan', 'gemini:plan', 'claude:plan-brief'].every((x) => q.includes(x)), 'the members plan, the moderator merges');
+  assert.ok(!q.includes('claude:plan') && !q.includes('claude:plan-debate'), 'the moderator speaks only in its synthesis');
   console.log('✓ DeepSeek executor line-up');
 
   // 1c. DeepSeek unavailable (no API key) → Codex implements instead
@@ -199,7 +200,7 @@ async function main() {
   id = await c.start({ projectDir: deb, mode: 'debate', topic: 'CRDT vs OT?', agents: three, maxRounds: 2 });
   s = await c.waitDone(id);
   assert.strictEqual(s.status, 'done');
-  assert.deepStrictEqual(phases(s).slice(0, 4).sort(), ['claude:brief', 'claude:opening', 'codex:opening', 'gemini:opening']);
+  assert.deepStrictEqual(phases(s).slice(0, 3).sort(), ['claude:brief', 'codex:opening', 'gemini:opening'], 'members open, the moderator synthesizes');
   assert.strictEqual(git(deb, 'rev-parse', '--abbrev-ref', 'HEAD').startsWith('council/'), false, 'debate must not branch');
   await c.post('inject', { runId: id, text: '비용도 고려해서 다시' });
   s = await c.waitDone(id);
