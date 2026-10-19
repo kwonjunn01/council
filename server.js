@@ -15,7 +15,7 @@ const pkg = require('./package.json');
 
 const PUB = path.join(__dirname, 'public');
 const MIME = { '.png': 'image/png', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
-const POST_ONLY = new Set(['install', 'login', 'start', 'stop', 'pause', 'resume', 'inject', 'publish', 'continue', 'rollback', 'forget', 'settings', 'preflight', 'secrets']);
+const POST_ONLY = new Set(['install', 'login', 'start', 'stop', 'pause', 'resume', 'inject', 'publish', 'continue', 'rollback', 'forget', 'settings', 'preflight', 'secrets', 'request', 'rejoin']);
 
 function readJson(req) {
   return new Promise((resolve, reject) => {
@@ -74,6 +74,8 @@ function createServer({ mock = false } = {}) {
     inject: (b) => { const s = session(b); if (!s.isActive) council.assertFolderFree(s); s.inject(b.text, b.replyTo); return { ok: true }; },
     publish: (b) => session(b).publish(),
     rollback: (b) => { session(b).rollback(b.sha); return { ok: true }; },
+    request: (b) => { session(b).resolveRequest(Number(b.msgId), b.action); return { ok: true }; },
+    rejoin: (b) => { session(b).rejoin(String(b.agent)); return { ok: true }; },
     forget: (b) => { council.forget(String(b.runId)); return { ok: true }; },
     preflight: (b) => council.preflight(b),
     github: (q) => GH.status(q.projectDir || process.cwd()),

@@ -36,6 +36,10 @@
       },
       "input": "stdin",
       "parser": "claude-stream-json",
+      "allowArgs": [
+        "--allowedTools",
+        "{rule}"
+      ],
       "role": "균형 잡힌 중재자: 기술적 디테일과 큰 그림 사이 한가운데에 서서, Codex의 엄밀함과 Gemini의 통찰을 서로의 언어로 옮기고 실용적인 결론으로 묶는다.",
       "modelArgs": [
         "--model",
@@ -104,6 +108,10 @@
       },
       "input": "stdin",
       "parser": "claude-stream-json",
+      "allowArgs": [
+        "--allowedTools",
+        "{rule}"
+      ],
       "role": "묵묵한 구현자: 토론에 끼지 않고, 합의된 계획과 모더레이터의 작업 지시를 그대로 따라 완성도 높은 코드를 빠르게 쓰고 테스트를 돌린다. 비평은 변명 없이 반영한다.",
       "modelArgs": [
         "--model",

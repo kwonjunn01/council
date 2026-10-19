@@ -41,6 +41,8 @@ process.stdin.on('data', (d) => { input += d; }).on('end', async () => {
   if (fail) { process.stderr.write(ERRORS[fail] + '\n'); process.exit(1); }
   if (phase === 'check') { process.stdout.write('OK\n'); return; }
 
+  let out = '';
+  const say = (t) => { out += t; process.stdout.write(t); };
   const lines = [
     `**[${id}]** ${phase} 단계, 라운드 ${round}.`,
     `- 앞선 발언의 약점: 가정이 검증되지 않았습니다.`,
@@ -50,10 +52,17 @@ process.stdin.on('data', (d) => { input += d; }).on('end', async () => {
     fs.appendFileSync(`mock-${id}.txt`, `round ${round}\n`);
     lines.push(`파일 수정: mock-${id}.txt`);
   }
-  for (const l of lines) { process.stdout.write(l + '\n'); await sleep(Number(process.env.COUNCIL_MOCK_DELAY || 120)); }
-  if (phase === 'work-order' && process.env.COUNCIL_MOCK_ASSIGN && round === Number(process.env.COUNCIL_MOCK_ASSIGN_ROUND || 0)) process.stdout.write(`\nASSIGN: ${process.env.COUNCIL_MOCK_ASSIGN} — 디자인 품질이 기준 미달\n`);
-  if (phase === 'plan-final') process.stdout.write('\nTest command: `node --version`\n');
-  if (phase === 'brief' && round === 1 && process.env.COUNCIL_MOCK_ASK !== '0') process.stdout.write('\nASK OWNER: 데이터는 로컬 파일과 DB 중 어디에 저장할까요?\n');
-  if (phase === 'brief' && /^Mode: auto$/m.test(input)) process.stdout.write(`NEXT: ${process.env.COUNCIL_MOCK_NEXT || 'BUILD'}\n`);
-  if (!['final', 'plan-final', 'summary'].includes(phase)) process.stdout.write(`\nVOTE: ${round >= 3 ? 'AGREE' : 'CONTINUE'}\n`);
+  for (const l of lines) { say(l + '\n'); await sleep(Number(process.env.COUNCIL_MOCK_DELAY || 120)); }
+  if (phase === 'work-order' && process.env.COUNCIL_MOCK_ASSIGN && round === Number(process.env.COUNCIL_MOCK_ASSIGN_ROUND || 0)) say(`\nASSIGN: ${process.env.COUNCIL_MOCK_ASSIGN} — 디자인 품질이 기준 미달\n`);
+  if (phase === 'plan-final') say('\nTest command: `node --version`\n');
+  if (phase === 'brief' && round === 1 && process.env.COUNCIL_MOCK_ASK !== '0') say('\nASK OWNER: 데이터는 로컬 파일과 DB 중 어디에 저장할까요?\n');
+  if (phase === 'brief' && /^Mode: auto$/m.test(input)) say(`NEXT: ${process.env.COUNCIL_MOCK_NEXT || 'BUILD'}\n`);
+  if (!['final', 'plan-final', 'summary'].includes(phase)) say(`\nVOTE: ${round >= 3 ? 'AGREE' : 'CONTINUE'}\n`);
+  // Permission drill: COUNCIL_MOCK_DENY="claude:npm run lint" reports that command as blocked in a Claude stream-json result,
+  // until the owner allows it — then it arrives as --allowedTools "Bash(npm run lint)".
+  const [denyAgent, denyCmd] = (process.env.COUNCIL_MOCK_DENY || '').split(/:(.*)/);
+  if (denyAgent === id && !write) {
+    const denials = process.argv.includes(`Bash(${denyCmd})`) ? [] : [{ tool_name: 'Bash', tool_input: { command: denyCmd } }];
+    process.stdout.write('\n' + JSON.stringify({ type: 'result', result: out, permission_denials: denials }) + '\n');
+  }
 });

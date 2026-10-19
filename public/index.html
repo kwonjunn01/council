@@ -99,21 +99,38 @@
             <button id="continueBtn" class="primary">▶ 이어서 진행</button>
             <button id="publishBtn">🐙 게시</button>
             <button id="deleteBtn" class="danger" title="세션 기록 삭제">🗑</button>
+            <button id="workBtn" title="요청과 에이전트 터미널을 옆에서 보기">💻 작업 창 <span id="workCount" class="count"></span></button>
           </div>
         </div>
         <div id="runMeta"></div>
         <div id="statusLine"></div>
       </header>
-      <div id="scroller">
-        <div id="plan" hidden><details><summary>📋 합의된 계획 (PLAN.md)</summary><div class="md" id="planBody"></div></details></div>
-        <div id="feed"></div>
-        <div id="live"></div>
+      <div id="runBody">
+        <div id="runMain">
+          <div id="scroller">
+            <div id="plan" hidden><details><summary>📋 합의된 계획 (PLAN.md)</summary><div class="md" id="planBody"></div></details></div>
+            <div id="feed"></div>
+            <div id="live"></div>
+          </div>
+          <div id="replyBar" hidden><span id="replyText"></span><button type="button" id="replyCancel" class="icon-btn">✕</button></div>
+          <form id="composer">
+            <textarea id="injectText" rows="2" placeholder="중재자로 끼어들기 — Enter 전송 · Shift+Enter 줄바꿈 · 끝난 세션에 보내면 이어서 진행"></textarea>
+            <button class="primary">전송</button>
+          </form>
+        </div>
+        <!-- work panel: what needs the owner, and each agent's live output -->
+        <aside id="work">
+          <section class="wsec">
+            <div class="wh">🔔 요청 <span id="reqCount" class="count"></span><button type="button" id="workClose" class="icon-btn" title="닫기">✕</button></div>
+            <div id="requests"></div>
+          </section>
+          <section class="wsec term">
+            <div class="wh">💻 터미널</div>
+            <div id="termTabs" class="tabs"></div>
+            <pre id="term"></pre>
+          </section>
+        </aside>
       </div>
-      <div id="replyBar" hidden><span id="replyText"></span><button type="button" id="replyCancel" class="icon-btn">✕</button></div>
-      <form id="composer">
-        <textarea id="injectText" rows="2" placeholder="중재자로 끼어들기 — Enter 전송 · Shift+Enter 줄바꿈 · 끝난 세션에 보내면 이어서 진행"></textarea>
-        <button class="primary">전송</button>
-      </form>
     </section>
   </main>
 

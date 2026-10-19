@@ -60,7 +60,7 @@ async function listen(server) {
 }
 
 async function main() {
-  const { server } = createServer({ mock: true });
+  const { server, council } = createServer({ mock: true });
   const c = client(await listen(server));
   const three = ['claude', 'codex', 'gemini'];
 
@@ -226,6 +226,24 @@ async function main() {
   assert.strictEqual(refused.status, 400);
   assert.match(refused.json.error, /다릅니다/);
   console.log('✓ GitHub field: clone into a new folder, link origin, refuse another origin');
+
+  // 3c. a blocked command becomes one request; once the owner allows it, later read turns may run it
+  process.env.COUNCIL_MOCK_DENY = 'claude:npm run lint';
+  council.config.agents.claude.parser = 'claude-stream-json';
+  id = await c.start({ projectDir: tempRepo('perm'), mode: 'debate', topic: 'perm', agents: ['claude', 'codex'], maxRounds: 1 });
+  s = await c.waitDone(id);
+  let reqs = s.messages.filter((m) => m.kind === 'request');
+  assert.strictEqual(reqs.length, 1, 'the same blocked command is asked once');
+  assert.strictEqual(reqs[0].rule, 'Bash(npm run lint)');
+  assert.strictEqual((await c.post('request', { runId: id, msgId: reqs[0].id, action: 'allow' })).status, 200);
+  await c.post('continue', { runId: id });
+  s = await c.waitDone(id);
+  assert.deepStrictEqual(s.allowed, { claude: ['Bash(npm run lint)'] });
+  assert.strictEqual(s.messages.filter((m) => m.kind === 'request').length, 1, 'an allowed command is not asked again');
+  assert.ok(s.messages.some((m) => m.agent === 'claude' && m.ok && m.round > 1), 'claude keeps working after the allow');
+  delete process.env.COUNCIL_MOCK_DENY;
+  council.config.agents.claude.parser = 'text';
+  console.log('✓ permission request → allowed for the session');
 
   // 4. failure drills: Gemini hits a usage limit, Codex has a network blip while implementing
   // maxRounds is generous: rounds keep going without consensus until Gemini's cooldown ends, however fast the machine.

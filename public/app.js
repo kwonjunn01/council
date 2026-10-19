@@ -17,6 +17,9 @@ let CFG = null, SESSIONS = [], SEL = null, RUN = null, CHECK = {}, PROBE = {}, M
 const MODELS = {};
 const EFFORT_KO = { low: '낮음', medium: '보통', high: '높음', xhigh: '매우 높음', max: '최대', ultra: '울트라', minimal: '최소' };
 const live = new Map();
+// Work panel terminal: per-agent output of this session (kept after a turn ends), and which tab is shown.
+const TERM = new Map();
+let TERM_SEL = null, TERM_PIN = false;
 
 // ---------- utils ----------
 async function api(name, body) {
@@ -140,7 +143,10 @@ async function select(id) {
   $('#runView').hidden = false;
   live.forEach((el) => el.remove());
   live.clear();
+  TERM.clear();
+  TERM_SEL = null; TERM_PIN = false;
   renderRun();
+  renderTerm();
   renderFeed();
   renderSessions();
 }
@@ -420,6 +426,14 @@ function msgEl(m) {
     }
     return el;
   }
+  if (m.kind === 'request') {
+    const st = RUN?.requests?.[m.id];
+    el.className = 'msg request' + (st ? ' done' : '');
+    el.innerHTML = `<div class="mh"><span class="who">🔐 권한 요청</span><span class="tag">R${m.round}</span>
+      <span>${st === 'allowed' ? '✅ 허용함' : st ? '무시함' : '💻 작업 창에서 처리'}</span><span style="margin-left:auto">${hhmm(m.ts)}</span></div>
+      <div>${esc(m.text)}</div>`;
+    return el;
+  }
   if (m.kind === 'system') {
     el.className = 'msg system';
     el.textContent = m.text;
@@ -474,7 +488,104 @@ function renderFeed() {
   toBottom(true);
 }
 
+// ---------- work panel ----------
+function termBuf(agent) {
+  if (!TERM.has(agent)) TERM.set(agent, { parts: [], size: 0, busy: false });
+  return TERM.get(agent);
+}
+function termPush(agent, cls, text) {
+  const b = termBuf(agent);
+  b.parts.push({ cls, text });
+  b.size += text.length;
+  while (b.size > 40000 && b.parts.length > 1) b.size -= b.parts.shift().text.length;
+  if (TERM_SEL !== agent) return;
+  const pre = $('#term');
+  const stick = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 60;
+  const span = document.createElement('span');
+  if (cls) span.className = cls;
+  span.textContent = text;
+  pre.appendChild(span);
+  if (stick) pre.scrollTop = pre.scrollHeight;
+}
+function termStart(ev) {
+  termBuf(ev.agent).busy = true;
+  if (!TERM_PIN || !TERM_SEL) TERM_SEL = ev.agent;
+  termPush(ev.agent, 'sep', `\n── R${ev.round ?? ''} · ${PHASE[ev.phase] || ev.phase || ''} · ${hhmm(new Date().toISOString())} ──\n`);
+  renderTerm();
+}
+function renderTerm() {
+  const agents = [...new Set([...(RUN?.initialAgents || RUN?.agents || []), ...TERM.keys()])];
+  if (!TERM_SEL || !agents.includes(TERM_SEL)) TERM_SEL = agents.find((a) => TERM.get(a)?.busy) || agents[0] || null;
+  $('#termTabs').innerHTML = agents.map((a) => `<button type="button" data-term="${esc(a)}" style="--c:${agentColor(a)}"
+    class="${a === TERM_SEL ? 'on' : ''} ${TERM.get(a)?.busy ? 'busy' : ''}"><span class="dot"></span>${esc(agentLabel(a))}</button>`).join('');
+  $('#termTabs').querySelectorAll('[data-term]').forEach((b) => { b.onclick = () => { TERM_SEL = b.dataset.term; TERM_PIN = true; renderTerm(); }; });
+  const pre = $('#term');
+  pre.innerHTML = '';
+  const parts = TERM.get(TERM_SEL)?.parts || [];
+  if (!parts.length) pre.textContent = isActive(RUN) ? '이 에이전트가 턴을 시작하면 여기에 실시간으로 표시됩니다.' : '세션이 실행 중일 때 각 에이전트가 하는 일(글·도구 호출·오류)이 여기에 실시간으로 표시됩니다.';
+  for (const p of parts) { const s = document.createElement('span'); if (p.cls) s.className = p.cls; s.textContent = p.text; pre.appendChild(s); }
+  pre.scrollTop = pre.scrollHeight;
+}
+
+// Everything that waits for the owner: questions, blocked permissions, logins, usage-limit waits.
+function renderRequests() {
+  const r = RUN;
+  if (!r) return;
+  const cards = [];
+  for (const m of r.messages || []) {
+    if (m.kind === 'question' && r.answers?.[m.id] === undefined) {
+      cards.push({ cls: '', head: `❓ ${agentLabel(m.agent)}의 질문 · R${m.round}`, body: esc(m.text), acts: [['답하기', 'primary', () => startReply(m)]] });
+    }
+    if (m.kind === 'request' && !r.requests?.[m.id]) {
+      const acts = m.rule
+        ? [['이 세션 동안 허용', 'primary', () => resolveRequest(m.id, 'allow')], ['무시', '', () => resolveRequest(m.id, 'dismiss')]]
+        : [['확인', '', () => resolveRequest(m.id, 'dismiss')]];
+      cards.push({ cls: '', head: `🔐 ${agentLabel(m.agent)} 권한 요청 · R${m.round} · ${PHASE[m.phase] || m.phase || ''}`,
+        body: `${esc(m.tool)}${m.detail ? ` <code>${esc(m.detail)}</code>` : ''}<br><small>${m.rule ? '허용하면 다음 턴부터 이 행동을 할 수 있습니다.' : '이 CLI는 읽기 전용 턴에서 개별 허용을 지원하지 않아 알림만 합니다.'}</small>`, acts });
+    }
+  }
+  for (const [a, why] of Object.entries(r.benched || {})) {
+    const acts = [];
+    if (CFG.agents[a]?.setup?.login) {
+      acts.push(['🔐 로그인', 'primary', async () => {
+        try { await api('login', { agent: a }); toast('ok', `${agentLabel(a)} 로그인 창을 열었습니다`, '로그인을 마치면 [다시 참여]를 누르세요.'); } catch (e) { toast('error', e.message); }
+      }]);
+    }
+    acts.push(['↩ 다시 참여', '', async () => { try { await api('rejoin', { runId: SEL, agent: a }); } catch (e) { toast('error', e.message); } }]);
+    cards.push({ cls: 'bad', head: `🚫 ${agentLabel(a)} 제외됨`, body: `${esc(why)}<br><small>문제를 해결한 뒤 [다시 참여]를 누르면 다음 턴부터 돌아옵니다.</small>`, acts });
+  }
+  for (const [a, t] of Object.entries(r.cooling || {})) cards.push({ cls: 'info', head: `⏳ ${agentLabel(a)} 사용량 한도`, body: `${hhmm(t)}에 자동으로 돌아옵니다.`, acts: [] });
+  if (r.waitingUntil) cards.push({ cls: 'info', head: '⏳ 모든 에이전트 한도 대기', body: `${hhmm(r.waitingUntil)}에 자동 재개합니다.`, acts: [] });
+
+  const box = $('#requests');
+  box.innerHTML = cards.length ? '' : '<div class="empty">지금 기다리는 요청이 없습니다.</div>';
+  for (const c of cards) {
+    const el = document.createElement('div');
+    el.className = `req ${c.cls}`;
+    el.innerHTML = `<div class="rh">${esc(c.head)}</div><div>${c.body}</div>`;
+    if (c.acts.length) {
+      const acts = document.createElement('div');
+      acts.className = 'acts';
+      for (const [label, cls, fn] of c.acts) { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (cls) b.className = cls; b.onclick = fn; acts.appendChild(b); }
+      el.appendChild(acts);
+    }
+    box.appendChild(el);
+  }
+  const waiting = cards.filter((c) => c.cls !== 'info').length;
+  $('#reqCount').textContent = waiting || '';
+  $('#workCount').textContent = waiting || '';
+}
+async function resolveRequest(msgId, action) {
+  try { await api('request', { runId: SEL, msgId, action }); } catch (e) { toast('error', e.message); }
+}
+function setWorkOpen(open) {
+  $('#runView').classList.toggle('work-open', open);
+  save('workOpen', open);
+  if (open) renderTerm();
+}
+
 function liveStart(ev) {
+  termStart(ev);
   let box = live.get(ev.key);
   if (!box) {
     box = document.createElement('div');
@@ -487,6 +598,7 @@ function liveStart(ev) {
     <span class="tag">R${ev.round ?? ''} · ${esc(PHASE[ev.phase] || ev.phase || '')}</span><span class="elapsed" data-t="${ev.startedAt || Date.now()}"></span></div><pre></pre>`;
 }
 function liveChunk(ev) {
+  termPush(ev.agent, ev.stream === 'tool' ? 'tool' : ev.stream === 'stderr' ? 'stderr' : '', ev.chunk);
   const box = live.get(ev.key);
   if (!box) return;
   const pre = box.querySelector('pre');
@@ -498,6 +610,11 @@ function liveChunk(ev) {
   pre.scrollTop = pre.scrollHeight;
 }
 function liveSync() {
+  const busy = new Set((RUN?.active || []).map((a) => a.agent));
+  let changed = false;
+  for (const [a, b] of TERM) if (b.busy !== busy.has(a)) { b.busy = busy.has(a); changed = true; }
+  for (const a of busy) if (!TERM.has(a)) { termBuf(a).busy = true; changed = true; }
+  if (changed) renderTerm();
   const keys = new Set((RUN?.active || []).map((a) => a.key));
   for (const [k, el] of live) if (!keys.has(k)) { el.remove(); live.delete(k); }
   for (const a of RUN?.active || []) if (!live.has(a.key)) liveStart({ ...a, round: RUN.round });
@@ -545,6 +662,7 @@ function renderRun() {
   if (r.waitingUntil) notes.push(`<span class="warn">⏳ 모든 에이전트 한도 대기 — ${hhmm(r.waitingUntil)}에 자동 재개</span>`);
   for (const [a, why] of Object.entries(r.benched || {})) notes.push(`<span class="bad">🚫 ${esc(agentLabel(a))}: ${esc(why)}</span>`);
   $('#statusLine').innerHTML = notes.join(' · ');
+  renderRequests();
   $('#plan').hidden = !r.plan;
   if (r.plan && $('#planBody').dataset.src !== r.plan) { $('#planBody').innerHTML = md(r.plan); $('#planBody').dataset.src = r.plan; }
   liveSync();
@@ -628,15 +746,16 @@ function connect() {
     const stick = nearBottom();
     if (ev.type === 'run') {
       const wasActive = isActive(RUN);
-      const prevAnswers = JSON.stringify(RUN.answers || {});
+      const prevAnswers = JSON.stringify([RUN.answers || {}, RUN.requests || {}]);
       RUN = { ...RUN, ...ev.run };
       renderRun();
-      // rollback buttons and answered questions change how old messages look
-      if (wasActive !== isActive(RUN) || prevAnswers !== JSON.stringify(RUN.answers || {})) renderFeed();
+      // rollback buttons and answered questions/requests change how old messages look
+      if (wasActive !== isActive(RUN) || prevAnswers !== JSON.stringify([RUN.answers || {}, RUN.requests || {}])) renderFeed();
     } else if (ev.type === 'message') {
       if (!RUN.messages.some((m) => m.id === ev.message.id)) {
         RUN.messages.push(ev.message);
         $('#feed').appendChild(msgEl(ev.message));
+        if (['question', 'request'].includes(ev.message.kind)) renderRequests();
       }
     } else if (ev.type === 'turn-start') liveStart({ ...ev, startedAt: Date.now() });
     else if (ev.type === 'live') liveChunk(ev);
@@ -666,6 +785,9 @@ async function init() {
   $('#probeBtn').onclick = probe;
   $('#setup').addEventListener('submit', start);
   $('#newBtn').onclick = showNew;
+  $('#workBtn').onclick = () => setWorkOpen(!$('#runView').classList.contains('work-open'));
+  $('#workClose').onclick = () => setWorkOpen(false);
+  setWorkOpen(load('workOpen') ?? window.innerWidth > 1100);
   $('#replyCancel').onclick = endReply;
   $('#settingsBtn').onclick = openSettings;
   $('#saveSecrets').onclick = saveSecretsNow;
