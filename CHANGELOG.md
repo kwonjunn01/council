@@ -3,6 +3,11 @@
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) · 버전: [SemVer](https://semver.org/lang/ko/)
 
 ## [Unreleased]
+### Changed
+- Gemini를 Gemini CLI(`gemini`) 대신 Antigravity CLI(`agy`)로 호출. 로그인은 `agy`, 모델 목록은 `agy models`에서 자동으로 불러오고 생각 깊이(낮음·보통·높음)를 고를 수 있음
+### Fixed
+- agy가 답을 낸 뒤 종료하지 않고 멈추는 경우, 5초 뒤 강제 종료하고 받은 답으로 진행(턴이 시간 제한까지 묶이던 문제)
+- 빈 응답 턴도 stderr를 turns/*.reply.md에 남김
 
 ## [0.5.0] - 2026-10-19
 ### Added

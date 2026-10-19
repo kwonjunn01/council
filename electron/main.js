@@ -3,7 +3,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
 const { execSync } = require('child_process');
 
-// GUI apps on macOS/Linux don't inherit the login shell's PATH, so `claude`/`codex`/`gemini` would not be found.
+// GUI apps on macOS/Linux don't inherit the login shell's PATH, so `claude`/`codex`/`agy` would not be found.
 if (process.platform !== 'win32') {
   try {
     const sh = process.env.SHELL || '/bin/zsh';

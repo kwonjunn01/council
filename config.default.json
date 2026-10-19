@@ -186,44 +186,54 @@
       "label": "Gemini",
       "color": "#4f8df7",
       "enabled": true,
-      "cmd": "gemini",
+      "cmd": "agy",
       "args": {
         "base": [
-          "-p",
-          "Follow the instructions provided on stdin exactly.",
-          "--skip-trust"
+          "--input-format",
+          "stream-json",
+          "--output-format",
+          "stream-json"
         ],
         "read": [
-          "--approval-mode",
+          "--mode",
           "plan"
         ],
         "write": [
-          "--approval-mode",
-          "yolo"
+          "--dangerously-skip-permissions"
         ],
-        "tail": []
+        "tail": [
+          "-p="
+        ]
       },
-      "input": "stdin",
-      "parser": "text",
+      "input": "agy-json",
+      "parser": "agy-stream-json",
       "role": "반대 측 논객·리서처: 전제를 의심하고 대안과 선행 사례, 외부 지식을 가져온다.",
       "modelArgs": [
-        "-m",
+        "--model",
         "{model}"
       ],
       "model": "",
       "setup": {
-        "npm": "@google/gemini-cli",
-        "login": "gemini"
+        "login": "agy"
       },
+      "modelsCmd": [
+        "models"
+      ],
+      "modelsFormat": "agy-tsv",
       "models": [
-        "auto",
-        "pro",
-        "flash",
-        "flash-lite",
-        "gemini-3-pro-preview",
-        "gemini-3.5-flash",
-        "gemini-2.5-pro"
-      ]
+        "gemini-4-argon",
+        "gemini-3.8-flash"
+      ],
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "effortArgs": [
+        "--effort",
+        "{effort}"
+      ],
+      "effort": ""
     }
   },
   "preflight": true,

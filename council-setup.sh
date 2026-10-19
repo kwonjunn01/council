@@ -27,13 +27,16 @@ if ! command -v node >/dev/null || [ "$(node_major)" -lt 18 ]; then
 fi
 ok "Node $(node -v)"
 
-say "3/5 AI CLI (Claude Code · Codex · Gemini)"
+say "3/5 AI CLI (Claude Code · Codex · Gemini/agy)"
 NPM_SUDO=""
 [ -w "$(npm prefix -g)/lib" ] || NPM_SUDO="$SUDO"
-for pkg in @anthropic-ai/claude-code @openai/codex @google/gemini-cli; do
+for pkg in @anthropic-ai/claude-code @openai/codex; do
   if npm ls -g --depth=0 "$pkg" >/dev/null 2>&1; then ok "$pkg 이미 설치됨"
   else $NPM_SUDO npm install -g --no-fund --no-audit "$pkg" >/dev/null && ok "$pkg 설치"; fi
 done
+# Gemini runs through the Antigravity CLI (agy), which is not an npm package.
+if command -v agy >/dev/null; then ok "agy $(agy --version 2>/dev/null) 이미 설치됨"
+else echo "  ⚠ Gemini용 Antigravity CLI(agy)가 없습니다. 따로 설치한 뒤 터미널에서 agy 를 한 번 실행해 로그인하세요."; fi
 
 say "4/5 Council 앱"
 DEB="$(ls -t "$HERE"/Council*.deb "$HERE"/council*.deb 2>/dev/null | head -1 || true)"

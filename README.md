@@ -72,10 +72,10 @@ Claude Code · Codex · Gemini CLI가 계획을 놓고 싸우고 서로의 결�
 
 1. 각 CLI 설치 후 터미널에서 **한 번씩 실행해 로그인**
    ```bash
-   npm i -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+   npm i -g @anthropic-ai/claude-code @openai/codex
    claude    # 로그인
    codex     # 로그인
-   gemini    # 로그인
+   agy       # 로그인 (Gemini는 Antigravity CLI로 호출합니다. agy는 npm 패키지가 아니라 따로 설치)
    ```
    DeepSeek은 Claude Code CLI를 DeepSeek의 Anthropic 호환 API에 연결해 씁니다. 별도 설치는 필요 없고 **API 키만** 있으면 됩니다.
 2. [Releases](../../releases)에서 앱 설치
@@ -87,7 +87,7 @@ Claude Code · Codex · Gemini CLI가 계획을 놓고 싸우고 서로의 결�
 소스에서 실행: `npm start` (브라우저 http://127.0.0.1:4517) · `npm run desktop` · `npm run mock` (토큰 없이 체험)
 
 ### Windows 메모
-- `npm i -g`로 설치한 `claude.cmd`/`codex.cmd`/`gemini.cmd`를 그대로 인식합니다.
+- `npm i -g`로 설치한 `claude.cmd`/`codex.cmd`를 그대로 인식합니다.
 - Codex의 Windows 네이티브 지원은 아직 실험적입니다. 리뷰어 역할(읽기 전용)이라 영향이 작고, 문제가 생기면 자동으로 제외됩니다.
 - 테스트 명령은 `cmd.exe`로 실행됩니다 (`npm test`, `pytest -q` 등은 그대로 동작).
 
@@ -96,7 +96,7 @@ Claude Code · Codex · Gemini CLI가 계획을 놓고 싸우고 서로의 결�
 새 세션 화면에서 에이전트마다 목록에서 고릅니다.
 - **Claude**: fable · opus · sonnet · haiku, 생각 깊이 5단계(낮음~최대)
 - **Codex**: 설치된 Codex에서 **현재 제공되는 모델 목록을 자동으로 불러오고**, 모델마다 지원하는 생각 깊이만 보여줍니다
-- **Gemini**: auto · pro · flash · flash-lite 등
+- **Gemini** (agy): `agy models`에서 **모델 목록을 자동으로 불러오고**(Gemini 4 Argon, Gemini 3.8 Flash 등), 생각 깊이 3단계(낮음·보통·높음)
 - **DeepSeek**: deepseek-chat · deepseek-reasoner
 - 목록에 없으면 "직접 입력…"
 
