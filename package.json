@@ -92,10 +92,17 @@
       "category": "Development"
     },
     "publish": {
-      "provider": "github"
+      "provider": "github",
+      "owner": "kwonjunn01",
+      "repo": "council"
     }
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kwonjunn01/council.git"
+  },
+  "homepage": "https://github.com/kwonjunn01/council"
 }
