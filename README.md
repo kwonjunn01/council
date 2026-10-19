@@ -75,7 +75,7 @@ Claude Code · Codex · Gemini CLI가 계획을 놓고 싸우고 서로의 결�
    npm i -g @anthropic-ai/claude-code @openai/codex
    claude    # 로그인
    codex     # 로그인
-   agy       # 로그인 (Gemini는 Antigravity CLI로 호출합니다. agy는 npm 패키지가 아니라 따로 설치)
+   agy       # 로그인 (Gemini CLI. npm 패키지가 아니라 따로 설치)
    ```
    DeepSeek은 Claude Code CLI를 DeepSeek의 Anthropic 호환 API에 연결해 씁니다. 별도 설치는 필요 없고 **API 키만** 있으면 됩니다.
 2. [Releases](../../releases)에서 앱 설치

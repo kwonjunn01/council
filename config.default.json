@@ -221,6 +221,7 @@
         "models"
       ],
       "modelsFormat": "agy-tsv",
+      "modelsFilter": "^gemini-",
       "models": [
         "gemini-4-argon",
         "gemini-3.8-flash"
