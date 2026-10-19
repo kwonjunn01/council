@@ -26,8 +26,11 @@ Claude(모더레이터) · Codex · Gemini가 토론·계획·리뷰하고 DeepS
 - 사용자에게 보이는 문구는 한국어, 코드·주석·커밋 메시지는 영어
 - 에이전트 CLI 인자를 바꾸면 실제 CLI로 `--help` 확인 후 앱의 "🔌 실제 호출 점검"으로 검증한다
 
-## 이어서 할 일 (2026-10-19 클라우드 세션에서 넘어옴)
-1. GitHub `kwonjunn01/council`에 push. 워크플로 파일 때문에 `gh auth refresh -h github.com -s workflow`가 필요할 수 있다. push 후 Actions의 CI(Win/Mac/Linux) 결과를 확인하고, 실패하면 고친다
-2. 실제 모델 4개로 점검: 각 CLI 로그인, DeepSeek 키는 앱 ⚙에서 입력. 클라우드에서는 네트워크가 막혀 Codex·Gemini·DeepSeek 실제 호출은 검증하지 못했다
-3. 실제 모델이 출력 규약(`VOTE/NEXT/ASK OWNER/ASSIGN`)을 지키는지 자동 모드 세션 하나로 확인
-4. `v0.5.0` 태그 push → Release 워크플로가 설치 파일을 만드는지 확인
+## 이어서 할 일 (2026-10-19 로컬 세션 기준)
+완료: main push + CI(Win/Mac/Linux) 통과, Claude·Codex·DeepSeek 실제 호출 점검, 실제 모델 자동 모드 세션(토론 → `NEXT: BUILD` → 계획 → DeepSeek 구현 → 테스트 통과 → 합의), `v0.5.0` 태그 → Release 워크플로가 설치 파일 생성
+
+남은 것:
+1. Gemini CLI 로그인(`gemini` 실행) 후 "🔌 실제 호출 점검"으로 4개 모두 확인
+2. `v0.5.0` 릴리스가 Draft로 생성됨(electron-builder 기본값). 공개해야 자동 업데이트가 동작한다. 앞으로 바로 공개하려면 `package.json` build.publish에 `"releaseType": "release"` 추가 검토
+3. 실제 모델로 `ASK OWNER`·`ASSIGN`은 아직 관찰하지 못했다(작은 과제라 나오지 않음)
+4. Actions의 `actions/checkout@v4`·`setup-node@v4`가 Node 20 지원 종료 경고를 낸다. v5로 올리기 검토
