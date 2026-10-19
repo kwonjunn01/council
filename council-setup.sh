@@ -51,8 +51,9 @@ if [ -n "$BUNDLE" ] && [ -t 0 ]; then
   read -r -p "  $(basename "$BUNDLE") 을(를) github.com/$REPO 에 올릴까요? [y/N] " yn
   if [[ "$yn" =~ ^[Yy] ]]; then
     command -v gh >/dev/null || $SUDO apt-get install -y -qq gh
-    gh auth status >/dev/null 2>&1 || gh auth login -h github.com -p https -w
-    gh auth setup-git >/dev/null 2>&1 || true
+    # Ubuntu 22.04 ships an old gh without -p / setup-git, so fall back step by step.
+    gh auth status >/dev/null 2>&1 || gh auth login -h github.com -p https -w 2>/dev/null || gh auth login -h github.com -w
+    gh auth setup-git >/dev/null 2>&1 || git config --global credential.helper '!gh auth git-credential'
     SRC="$HOME/council"
     [ -d "$SRC/.git" ] || git clone -q "$BUNDLE" "$SRC"
     git -C "$SRC" fetch -q "$BUNDLE" 'refs/heads/*:refs/remotes/bundle/*' 'refs/tags/*:refs/tags/*' || true
