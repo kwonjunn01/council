@@ -195,9 +195,10 @@ async function main() {
   console.log('✓ concurrent sessions');
 
   // 4. failure drills: Gemini hits a usage limit, Codex has a network blip while implementing
+  // maxRounds is generous: rounds keep going without consensus until Gemini's cooldown ends, however fast the machine.
   process.env.COUNCIL_MOCK_FAIL = 'gemini:limit:1:review,codex:network:1:implement';
   const drill = tempRepo('drill');
-  id = await c.start({ projectDir: drill, mode: 'develop', topic: 'drill', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 6, planRounds: 1, testCmd: passFile });
+  id = await c.start({ projectDir: drill, mode: 'develop', topic: 'drill', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 40, planRounds: 1, testCmd: passFile });
   s = await c.waitDone(id);
   let t = sysText(s);
   assert.strictEqual(s.status, 'done', t);
