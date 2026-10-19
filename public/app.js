@@ -26,7 +26,8 @@ async function api(name, body) {
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function inline(s) {
-  return s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  return s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noreferrer">$2</a>');
 }
 function md(src) {
   const parts = String(src || '').split(/^```/m);
@@ -104,11 +105,11 @@ function setMode(m) {
 
 function load(k) { try { return JSON.parse(localStorage.getItem('council.' + k)); } catch { return null; } }
 function save(k, v) { try { localStorage.setItem('council.' + k, JSON.stringify(v)); } catch {} }
-const FIELDS = ['projectDir', 'topic', 'maxRounds', 'planRounds', 'language', 'testCmd'];
+const FIELDS = ['projectDir', 'topic', 'maxRounds', 'planRounds', 'language', 'testCmd', 'issue'];
+const CHECKS = ['relentless', 'blindOpening', 'branch', 'publish'];
 function saveForm() {
   for (const f of FIELDS) save(f, $('#' + f).value);
-  save('relentless', $('#relentless').checked);
-  save('blindOpening', $('#blindOpening').checked);
+  for (const c of CHECKS) save(c, $('#' + c).checked);
   save('moderator', $('#moderator').value);
   save('worker', $('#worker').value);
   const agents = {};
@@ -119,8 +120,7 @@ function saveForm() {
 }
 function restoreForm() {
   for (const f of FIELDS) { const v = load(f); if (v != null) $('#' + f).value = v; }
-  if (load('relentless') != null) $('#relentless').checked = load('relentless');
-  if (load('blindOpening') != null) $('#blindOpening').checked = load('blindOpening');
+  for (const c of CHECKS) if (load(c) != null) $('#' + c).checked = load(c);
   setMode(load('mode') || 'debate');
 }
 
@@ -136,6 +136,7 @@ async function start(e) {
       moderator: $('#moderator').value, worker: $('#worker').value,
       maxRounds: $('#maxRounds').value, planRounds: $('#planRounds').value, language: $('#language').value,
       testCmd: $('#testCmd').value, relentless: $('#relentless').checked, blindOpening: $('#blindOpening').checked,
+      issue: $('#issue').value, branch: $('#branch').checked, publish: $('#publish').checked,
     });
   } catch (err) { $('#err').textContent = err.message; }
 }
@@ -212,6 +213,12 @@ function renderRun() {
   $('#setup').hidden = !!active;
   $('#controls').hidden = !RUN;
   $('#newBtn').hidden = !!active;
+  const canPublish = RUN && !active && (RUN.mode === 'develop' ? !!RUN.branch : !!RUN.issue);
+  $('#publishBtn').hidden = !canPublish;
+  $('#publishBtn').disabled = !!RUN?.publishing;
+  $('#publishBtn').textContent = RUN?.publishing ? '🐙 게시 중…' : RUN?.published ? '🐙 GitHub 다시 게시 (업데이트)' : (RUN?.mode === 'develop' ? '🐙 push + PR 만들기' : '🐙 이슈에 결론 게시');
+  $('#publishedLink').hidden = !RUN?.published;
+  if (RUN?.published) { $('#publishedLink').href = RUN.published; $('#publishedLink').textContent = '↗ ' + RUN.published; }
   ['#pauseBtn', '#finishBtn', '#killBtn'].forEach((s) => { $(s).disabled = !active; });
   if (!RUN) { $('#runTitle').textContent = '세션 없음'; $('#runMeta').innerHTML = ''; return; }
   $('#statusDot').className = RUN.status;
@@ -222,6 +229,9 @@ function renderRun() {
   $('#runMeta').innerHTML = [
     `<span>${RUN.mode === 'develop' ? '🛠 개발' : '💬 토론'} · ${stage}</span>`,
     `<span>📁 ${esc(RUN.projectDir)}</span>`,
+    RUN.branch ? `<span>🌿 ${esc(RUN.branch)} ← ${esc(RUN.baseBranch)}</span>` : '',
+    RUN.issue ? `<span>🐙 <a href="${esc(RUN.issue.url)}" target="_blank">#${RUN.issue.number}</a></span>` : '',
+    RUN.published ? `<span>🔗 <a href="${esc(RUN.published)}" target="_blank">게시됨</a></span>` : '',
     ...RUN.agents.map((a) => `<span style="color:${agentColor(a)}">● ${esc(agentLabel(a))}${roleOf(a) ? ` (${esc(roleOf(a))})` : ''}</span>`),
     RUN.relentless ? '<span>🔥 무자비</span>' : '',
     `<span title="${esc(RUN.runDir)}">🗂 .council/runs/${esc(RUN.id)}</span>`,
@@ -229,6 +239,36 @@ function renderRun() {
   $('#plan').hidden = !RUN.plan;
   if (RUN.plan) $('#planBody').innerHTML = md(RUN.plan);
   liveSync();
+}
+
+async function checkGithub() {
+  const dir = $('#projectDir').value.trim();
+  const el = $('#ghStatus');
+  if (!dir) { el.className = 'hint'; el.textContent = '프로젝트 폴더를 입력하면 저장소를 확인합니다.'; return; }
+  el.className = 'hint'; el.textContent = '확인 중…';
+  try {
+    const g = await api('github?projectDir=' + encodeURIComponent(dir));
+    const parts = [];
+    let ok = true;
+    if (!g.git) { parts.push('git 저장소 아님 (체크포인트·브랜치·PR 불가 — git init 권장)'); ok = false; }
+    else parts.push(g.repo ? `github.com/${g.repo}` : (g.remote ? `remote: ${g.remote}` : 'remote 없음'), `브랜치 ${g.branch}`);
+    if (!g.gh) { parts.push('gh CLI 없음 (이슈/PR 기능 불가)'); ok = false; }
+    else if (!g.authed) { parts.push('gh 로그인 필요: gh auth login'); ok = false; }
+    else parts.push('gh 로그인됨');
+    el.className = 'hint ' + (ok && g.repo ? 'ok' : 'bad');
+    el.textContent = (ok && g.repo ? '✓ ' : '⚠ ') + parts.join(' · ');
+  } catch (err) { el.className = 'hint bad'; el.textContent = err.message; }
+}
+
+async function previewIssue() {
+  const ref = $('#issue').value.trim();
+  const el = $('#issuePreview');
+  if (!ref) { el.textContent = ''; return; }
+  el.className = 'hint'; el.textContent = '이슈 불러오는 중…';
+  try {
+    const i = await api(`issue?projectDir=${encodeURIComponent($('#projectDir').value.trim())}&ref=${encodeURIComponent(ref)}`);
+    el.className = 'hint ok'; el.textContent = `✓ #${i.number} ${i.title}`;
+  } catch (err) { el.className = 'hint bad'; el.textContent = err.message; }
 }
 
 function connect() {
@@ -270,7 +310,12 @@ async function init() {
     $('#pickDir').onclick = async () => { const d = await window.councilDesktop.pickDir(); if (d) { $('#projectDir').value = d; saveForm(); } };
   }
   document.querySelectorAll('#modeSeg button').forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
-  ['#moderator', '#worker', ...FIELDS.map((f) => '#' + f), '#relentless', '#blindOpening'].forEach((s) => $(s).addEventListener('change', saveForm));
+  ['#moderator', '#worker', ...FIELDS.map((f) => '#' + f), ...CHECKS.map((c) => '#' + c)].forEach((s) => $(s).addEventListener('change', saveForm));
+  $('#projectDir').addEventListener('change', checkGithub);
+  $('#issueLoad').onclick = previewIssue;
+  $('#issue').addEventListener('change', previewIssue);
+  $('#publishBtn').onclick = async () => { try { await api('publish', {}); } catch (err) { alert(err.message); } };
+  checkGithub();
   $('#setup').addEventListener('submit', start);
   $('#pauseBtn').onclick = () => api(RUN?.paused ? 'resume' : 'pause', {});
   $('#finishBtn').onclick = () => api('stop', { hard: false });

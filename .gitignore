@@ -1,3 +1,4 @@
 node_modules/
 .council/
 council.config.json
+dist/

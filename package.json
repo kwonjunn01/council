@@ -1,18 +1,98 @@
 {
   "name": "council",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Make Claude Code, Codex and Gemini CLI debate and build a project together",
   "main": "electron/main.js",
-  "bin": { "council": "server.js" },
+  "bin": {
+    "council": "server.js"
+  },
   "scripts": {
     "start": "node server.js",
     "mock": "node server.js --mock",
+    "test": "node test/e2e.js",
     "desktop": "electron .",
-    "desktop:mock": "electron . --mock"
+    "desktop:mock": "electron . --mock",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "devDependencies": {
-    "electron": "^33.2.1"
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "author": {
+    "name": "kwonjunn01",
+    "email": "kwonjunn01@yonsei.ac.kr"
+  },
+  "build": {
+    "appId": "dev.council.app",
+    "productName": "Council",
+    "artifactName": "Council-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "server.js",
+      "lib/**",
+      "public/**",
+      "electron/**",
+      "mock/**",
+      "build/icon.*",
+      "config.default.json",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Council"
+    },
+    "portable": {
+      "artifactName": "Council-${version}-portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png",
+      "category": "Development"
+    },
+    "publish": {
+      "provider": "github"
+    }
+  }
 }

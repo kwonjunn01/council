@@ -20,7 +20,12 @@ button.ghost { background: transparent; width: 100%; margin-top: 8px; }
 button:disabled { opacity: .5; cursor: default; }
 
 #side { width: 360px; min-width: 300px; overflow-y: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 16px; }
-.brand { font-size: 18px; font-weight: 700; margin-bottom: 14px; }
+.brand { font-size: 18px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.brand img { width: 28px; height: 28px; }
+a { color: var(--accent); }
+#publishedLink { display: block; margin-top: 8px; font-size: 13px; word-break: break-all; }
+.hint.ok { color: var(--ok); } .hint.bad { color: var(--danger); }
+.check code { font-size: 12px; }
 .badge { font-size: 11px; background: var(--warn); color: #000; border-radius: 4px; padding: 1px 5px; vertical-align: middle; }
 label { display: block; margin: 10px 0; color: var(--muted); font-size: 12.5px; }
 label > input, label > select, label > textarea, label > .row { margin-top: 4px; color: var(--ink); font-size: 14px; }

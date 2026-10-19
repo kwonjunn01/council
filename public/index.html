@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Council</title>
   <link rel="stylesheet" href="style.css">
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="icon.png">
 </head>
 <body>
   <aside id="side">
-    <div class="brand">⚔️ Council <span id="mockBadge" class="badge" hidden>MOCK</span></div>
+    <div class="brand"><img src="icon.png" alt=""> Council <span id="mockBadge" class="badge" hidden>MOCK</span></div>
 
     <form id="setup">
       <label>프로젝트 폴더
@@ -23,7 +23,7 @@
       <p class="hint" id="modeHint"></p>
 
       <label>주제 / 미션
-        <textarea id="topic" rows="6" placeholder="예) 이 저장소에 실시간 협업 편집 기능을 넣자. CRDT vs OT 중 무엇으로, 어떤 구조로?" required></textarea>
+        <textarea id="topic" rows="6" placeholder="예) 이 저장소에 실시간 협업 편집 기능을 넣자. CRDT vs OT 중 무엇으로, 어떤 구조로?&#10;(GitHub 이슈를 지정하면 비워둬도 됩니다)"></textarea>
       </label>
 
       <fieldset>
@@ -46,6 +46,17 @@
         <input id="testCmd" placeholder="npm test / pytest -q / cargo test">
       </label>
 
+      <fieldset id="ghBox">
+        <legend>🐙 GitHub</legend>
+        <div id="ghStatus" class="hint">프로젝트 폴더를 입력하면 저장소를 확인합니다.</div>
+        <label>이슈를 미션으로 <small>(#12 · owner/repo#12 · URL — 선택)</small>
+          <div class="row"><input id="issue" placeholder="#12"><button type="button" id="issueLoad">확인</button></div>
+        </label>
+        <div id="issuePreview" class="hint"></div>
+        <label class="check dev-only"><input type="checkbox" id="branch" checked> <span><b>세션 전용 브랜치</b> — <code>council/…</code> 브랜치에서 작업해 원래 브랜치 보호</span></label>
+        <label class="check"><input type="checkbox" id="publish"> <span><b>끝나면 GitHub에 게시</b> — 개발: push + PR 생성 · 토론: 이슈에 결론 코멘트</span></label>
+      </fieldset>
+
       <label class="check"><input type="checkbox" id="relentless"> <span><b>무자비 모드</b> — 합의해도 멈추지 않고 합의안을 다시 공격·개선</span></label>
       <label class="check"><input type="checkbox" id="blindOpening" checked> <span><b>블라인드 오프닝</b> — 1라운드는 서로 안 보고 독립 제안</span></label>
 
@@ -60,6 +71,8 @@
         <button id="finishBtn">🏁 마무리</button>
         <button id="killBtn" class="danger">⛔ 중단</button>
       </div>
+      <button id="publishBtn" class="ghost" hidden>🐙 GitHub에 게시</button>
+      <a id="publishedLink" target="_blank" hidden></a>
       <button id="newBtn" class="ghost" hidden>＋ 새 세션</button>
     </div>
   </aside>

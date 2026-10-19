@@ -1,4 +1,6 @@
-# ⚔️ Council
+<p align="center"><img src="build/icon.png" width="120" alt="Council"></p>
+
+# Council
 
 **Claude Code · Codex · Gemini CLI**를 한 프로젝트에 투입해서 서로 무자비하게 토론하고, 비판하고, 코드를 개선하게 만드는 데스크탑 앱.
 
@@ -50,7 +52,29 @@ API 키 없이 **이미 로그인해둔 각 CLI(구독제)를 헤드리스 모�
 하단 입력창에 쓰면 다음 턴부터 모든 에이전트가 **최우선 지시**로 봅니다. 끝난 세션에 보내면 **이어서 계속** 진행합니다.
 `⏸ 일시정지`, `🏁 마무리`(현재 턴 후 최종 보고서), `⛔ 중단`(즉시 kill).
 
+## 🐙 GitHub 연동
+
+`git` + `gh` CLI를 그대로 사용합니다 (`gh auth login` 한 번이면 끝, Council은 토큰을 저장하지 않음).
+
+| 기능 | 설명 |
+|---|---|
+| **이슈 → 미션** | `#12`, `owner/repo#12`, 이슈 URL을 넣으면 제목·본문·최근 코멘트를 미션으로 가져옴. 주제 칸은 추가 지시로 사용 |
+| **세션 전용 브랜치** | 개발 모드는 `council/<세션id>` 브랜치를 만들어 작업. 원래 브랜치는 그대로 |
+| **자동 PR** | 끝나면 push + PR 생성. 본문 = 최종 보고서 + 합의된 계획 + `Closes #12` |
+| **이슈에 판정 게시** | 토론 모드는 결론을 이슈 코멘트로 게시 |
+| **수동 게시** | 세션이 끝난 뒤 왼쪽 `🐙` 버튼. 다시 누르면 PR 본문 업데이트 |
+
+추천 워크플로: 할 일을 GitHub 이슈로 쌓아두고 → 이슈 번호만 넣고 개발 모드 실행 → PR 리뷰 후 머지.
+
 ## 설치 & 실행
+
+### 데스크탑 앱 (Windows / macOS / Linux)
+[Releases](../../releases)에서 받기:
+- **Windows**: `Council-x.y.z-win-x64.exe` (설치형) 또는 `Council-x.y.z-portable.exe` (설치 없이 실행)
+- **macOS**: `.dmg` (서명 안 됨 → 처음 한 번 우클릭 → 열기)
+- **Linux**: `.AppImage` / `.deb`
+
+### 소스에서
 
 ```bash
 # 사전: 각 CLI 설치 + 로그인 (한 번씩 대화형으로 실행해서 로그인해 두세요)
@@ -65,6 +89,19 @@ npm run desktop      # 폴더 선택 다이얼로그 포함 데스크탑 창
 ```
 
 왼쪽 패널에서 각 에이전트 옆 점이 초록이면 CLI가 인식된 것입니다.
+
+### Windows 메모
+- `npm i -g`로 설치한 CLI(`claude.cmd`, `codex.cmd`, `gemini.cmd`)를 그대로 인식합니다. PowerShell에서 `claude --version`이 되면 OK.
+- Codex CLI의 Windows 네이티브 지원은 아직 실험적입니다. 워커로 불안정하면 메인 워커를 Claude로 바꾸세요.
+- 테스트 명령은 `cmd.exe`로 실행됩니다 (`npm test`, `pytest -q` 등은 그대로 동작).
+
+### 빌드 & 릴리스
+```bash
+npm test                 # 가짜 에이전트로 전체 흐름 e2e 테스트
+npm run dist:win         # dist/ 에 Windows 설치 파일 (Linux/macOS에서도 빌드 가능)
+git tag v0.2.0 && git push --tags   # GitHub Actions가 Win/Mac/Linux 설치 파일을 Releases에 업로드
+```
+CI(`.github/workflows/ci.yml`)는 push/PR마다 Windows·macOS·Linux에서 e2e 테스트를 돌립니다.
 
 ## 설정
 
@@ -102,6 +139,6 @@ npm run desktop      # 폴더 선택 다이얼로그 포함 데스크탑 창
 ## ⚠️ 주의
 
 - 워커는 **권한 확인 없이** 파일을 수정하고 명령을 실행합니다 (`--full-auto`, `bypassPermissions`, `--yolo`). 반드시 git으로 관리되는 폴더에서, 가능하면 별도 브랜치에서 돌리세요.
-- 첫 체크포인트 커밋은 그 시점의 커밋 안 된 변경까지 포함합니다. 시작 전에 커밋해 두세요.
+- 첫 체크포인트 커밋은 그 시점의 커밋 안 된 변경까지 포함합니다 (세션 브랜치로 함께 옮겨감). 시작 전에 커밋해 두세요.
 - 서버는 `127.0.0.1`에만 바인딩되고, 다른 웹사이트가 로컬 에이전트를 조작하지 못하도록 POST에 커스텀 헤더를 요구합니다.
 - CLI 플래그는 버전마다 바뀔 수 있습니다. 에이전트가 계속 실패하면(3회 연속 실패 시 자동 제외) `turns/*.reply.md`의 stderr를 보고 `args`를 조정하세요.

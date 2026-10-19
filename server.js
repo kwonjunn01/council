@@ -6,9 +6,10 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { loadConfig, expandEnv } = require('./lib/config');
 const { Council } = require('./lib/council');
+const GH = require('./lib/github');
 
 const PUB = path.join(__dirname, 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.png': 'image/png', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 
 function readJson(req) {
   return new Promise((resolve, reject) => {
@@ -55,6 +56,9 @@ function createServer({ mock = false } = {}) {
     pause: () => { council.pause(); return { ok: true }; },
     resume: () => { council.resume(); return { ok: true }; },
     inject: (b) => { council.inject(b.text); return { ok: true }; },
+    publish: () => council.publish(),
+    github: (q) => GH.status(q.projectDir || process.cwd()),
+    issue: (q) => GH.fetchIssue(q.projectDir || process.cwd(), q.ref),
   };
 
   const server = http.createServer(async (req, res) => {
@@ -75,8 +79,8 @@ function createServer({ mock = false } = {}) {
           if (req.headers['x-council'] !== '1') return sendJson(res, 403, { error: 'forbidden' });
           return sendJson(res, 200, (await fn(await readJson(req))) ?? {});
         }
-        if (['start', 'stop', 'pause', 'resume', 'inject'].includes(url.pathname.slice(5))) return sendJson(res, 405, { error: 'POST only' });
-        return sendJson(res, 200, (await fn({})) ?? null);
+        if (['start', 'stop', 'pause', 'resume', 'inject', 'publish'].includes(url.pathname.slice(5))) return sendJson(res, 405, { error: 'POST only' });
+        return sendJson(res, 200, (await fn(Object.fromEntries(url.searchParams))) ?? null);
       }
       const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
       const file = path.resolve(PUB, rel);

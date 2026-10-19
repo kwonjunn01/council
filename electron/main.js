@@ -14,13 +14,16 @@ if (process.platform !== 'win32') {
 
 const { createServer } = require('../server');
 
+if (process.platform === 'win32') app.setAppUserModelId('dev.council.app');
+
 let council;
 app.whenReady().then(() => {
   const created = createServer({ mock: process.argv.includes('--mock') });
   council = created.council;
   created.server.listen(0, '127.0.0.1', () => {
     const win = new BrowserWindow({
-      width: 1440, height: 920, title: 'Council', backgroundColor: '#141414',
+      width: 1440, height: 920, minWidth: 900, minHeight: 600, title: 'Council', backgroundColor: '#141414',
+      icon: path.join(__dirname, '..', 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'), autoHideMenuBar: true,
       webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
     });
     win.loadURL(`http://127.0.0.1:${created.server.address().port}`);
