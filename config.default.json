@@ -42,6 +42,7 @@
         "{model}"
       ],
       "model": "",
+      "stepInModel": "opus",
       "setup": {
         "npm": "@anthropic-ai/claude-code",
         "login": "claude"
@@ -103,7 +104,7 @@
       },
       "input": "stdin",
       "parser": "claude-stream-json",
-      "role": "메인 구현자: 합의된 계획과 모더레이터의 작업 지시를 그대로 따라 완성도 높은 코드를 빠르게 쓰고 테스트를 돌린다.",
+      "role": "묵묵한 구현자: 토론에 끼지 않고, 합의된 계획과 모더레이터의 작업 지시를 그대로 따라 완성도 높은 코드를 빠르게 쓰고 테스트를 돌린다. 비평은 변명 없이 반영한다.",
       "modelArgs": [
         "--model",
         "{model}"
@@ -253,9 +254,7 @@
   ],
   "maxConcurrentSessions": 4,
   "escalationOrder": [
-    "claude",
-    "codex",
-    "gemini"
+    "claude"
   ],
   "escalateAfterFailedTests": 2
 }

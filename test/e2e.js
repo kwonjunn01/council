@@ -156,8 +156,18 @@ async function main() {
   delete process.env.COUNCIL_MOCK_ASSIGN; delete process.env.COUNCIL_MOCK_ASSIGN_ROUND;
   q = s.messages.filter((m) => m.phase === 'implement' && m.ok).map((m) => `R${m.round}:${m.agent}`);
   assert.ok(q.includes('R2:deepseek') && q.includes('R3:claude'), q.join(', '));
-  assert.match(sysText(s), /고급 모델 투입: Claude.*디자인 품질/);
+  assert.match(sysText(s), /고급 모델 투입: Claude \(opus\).*디자인 품질/);
+  assert.strictEqual(s.messages.find((m) => m.phase === 'implement' && m.round === 3).model, 'opus', 'Claude steps in on its stepInModel');
   console.log(`✓ moderator ASSIGN → stronger model for one round (${q.join(' ')})`);
+
+  // 1e'. the critics stay critics: an ASSIGN to Codex is ignored
+  Object.assign(process.env, { COUNCIL_MOCK_ASSIGN: 'Codex', COUNCIL_MOCK_ASSIGN_ROUND: '2' });
+  id = await c.start({ projectDir: tempRepo('assign2'), mode: 'develop', topic: 'assign drill', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 4, planRounds: 1 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_ASSIGN; delete process.env.COUNCIL_MOCK_ASSIGN_ROUND;
+  q = s.messages.filter((m) => m.phase === 'implement' && m.ok).map((m) => m.agent);
+  assert.ok(q.length && q.every((a) => a === 'deepseek'), q.join(', '));
+  console.log('✓ ASSIGN to a critic is ignored');
 
   // 1f. tests fail twice in a row with DeepSeek → a stronger model steps in automatically
   id = await c.start({ projectDir: tempRepo('escalate'), mode: 'develop', topic: 'escalation drill', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 8, planRounds: 1,
