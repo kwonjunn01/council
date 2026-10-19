@@ -9,6 +9,7 @@ const { Council } = require('./lib/council');
 const GH = require('./lib/github');
 const { setupLogging } = require('./lib/log');
 const { openTerminal, installScript } = require('./lib/terminal');
+const { listModels } = require('./lib/models');
 const pkg = require('./package.json');
 
 const PUB = path.join(__dirname, 'public');
@@ -51,7 +52,7 @@ function createServer({ mock = false } = {}) {
     config: () => ({
       version: pkg.version, language: config.language, mock, platform: process.platform,
       agents: Object.fromEntries(Object.entries(config.agents).map(([id, a]) =>
-        [id, { label: a.label, color: a.color, role: a.role, enabled: a.enabled !== false, executor: !!a.executor, cmd: a.cmd, model: a.model || '', hasModel: !!a.modelArgs, setup: a.setup || null }])),
+        [id, { label: a.label, color: a.color, role: a.role, enabled: a.enabled !== false, executor: !!a.executor, cmd: a.cmd, model: a.model || '', hasModel: !!a.modelArgs, hasEffort: !!a.effortArgs, effort: a.effort || '', setup: a.setup || null }])),
     }),
     check: async () => Object.fromEntries(await Promise.all(Object.entries(config.agents).map(async ([id, a]) => {
       const r = await checkAgent(a);
@@ -62,13 +63,14 @@ function createServer({ mock = false } = {}) {
       return [id, r];
     }))),
     sessions: () => council.list(),
+    models: (q) => { const a = config.agents[q.agent]; if (!a) throw new Error('없는 에이전트입니다.'); return listModels(q.agent, a); },
     state: (q) => session(q).snapshot(),
     start: (b) => council.start(b),
     stop: (b) => { session(b).stop(!!b.hard); return { ok: true }; },
     pause: (b) => { session(b).pause(); return { ok: true }; },
     resume: (b) => { session(b).resume(); return { ok: true }; },
     continue: (b) => { const s = session(b); council.assertFolderFree(s); s.continue(); return { ok: true }; },
-    inject: (b) => { const s = session(b); if (!s.isActive) council.assertFolderFree(s); s.inject(b.text); return { ok: true }; },
+    inject: (b) => { const s = session(b); if (!s.isActive) council.assertFolderFree(s); s.inject(b.text, b.replyTo); return { ok: true }; },
     publish: (b) => session(b).publish(),
     rollback: (b) => { session(b).rollback(b.sha); return { ok: true }; },
     forget: (b) => { council.forget(String(b.runId)); return { ok: true }; },

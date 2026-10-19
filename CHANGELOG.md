@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-19
+### Added
+- 🤖 자동 모드(기본): 화두만 던지면 토론 → 합의 후 모더레이터가 구현 필요 여부(NEXT: BUILD/TALK) 판단 → 계획 → 구현
+- 사람에게 되묻는 질문(ASK OWNER): 질문 카드 + [답하기], 데스크탑 알림, 답을 기다리지 않고 가정으로 계속 진행
+- 모델·생각 깊이(effort) 목록 선택: Claude(--effort), Codex(설치된 CLI에서 모델 목록과 모델별 effort 자동 수집), Gemini, DeepSeek
+- 평가 기준: 쓸모(실제 사용자 문제), 디자인 품질, 한 모델 취향 쏠림 점검. 계획서에 "사용자와 문제", "디자인 원칙" 섹션 추가
+- 고급 모델 투입: 모더레이터의 ASSIGN 또는 테스트 2연속 실패 시 Claude→Codex→Gemini 순으로 한 라운드 대신 구현
+- 계획서에서 테스트 명령 자동 인식
+### Changed
+- 구현 전담 모델(DeepSeek)은 리뷰에서도 제외(구현만 담당)
+- 메시지 본문에서 VOTE/NEXT/ASK OWNER 줄을 숨기고 배지·카드로 표시
+
 ## [0.4.0] - 2026-10-19
 ### Added
 - 원클릭 설치 스크립트 `council-setup.sh` (Ubuntu): Node·git·AI CLI 3종·앱 설치, GitHub 업로드(선택), 앱 실행

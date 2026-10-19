@@ -8,11 +8,14 @@ const PHASE = {
 const STATUS = { created: '준비', running: '진행 중', paused: '일시정지', done: '완료', stopped: '중단됨', error: '오류', interrupted: '중단됨(앱 종료)' };
 const DEFAULT_ROLES = { moderator: 'claude', worker: 'deepseek' };
 const MODE_HINT = {
+  auto: '화두만 던지세요. 세 모델이 토론하고, 합의 후 코드 작업이 필요하다고 판단되면 알아서 계획 → 구현(워커) → 리뷰를 반복합니다. 꼭 필요한 것만 나에게 질문합니다.',
   debate: '선택한 모델들이 토론합니다. 모더레이터가 입장을 내고 → 나머지가 이름을 불러 반박 → 모더레이터가 쟁점·다음 질문 정리. 투표한 전원이 AGREE면 합의.',
   develop: '① 워커를 뺀 나머지가 블라인드 계획 → 계획 토론 → PLAN.md 확정  ② 워커가 구현 → git 체크포인트 → 테스트 → 리뷰어 비판 → 모더레이터 작업 지시 → 반복. 워커가 막히면 다른 모델이 대신 구현.',
 };
 
-let CFG = null, SESSIONS = [], SEL = null, RUN = null, CHECK = {}, PROBE = {}, MODE = 'debate';
+let CFG = null, SESSIONS = [], SEL = null, RUN = null, CHECK = {}, PROBE = {}, MODE = 'auto', REPLY_TO = null;
+const MODELS = {};
+const EFFORT_KO = { low: '낮음', medium: '보통', high: '높음', xhigh: '매우 높음', max: '최대', ultra: '울트라', minimal: '최소' };
 const live = new Map();
 
 // ---------- utils ----------
@@ -108,7 +111,7 @@ function renderSessions() {
     const dot = s.waitingUntil ? 'waiting' : s.status;
     return `<button class="sitem ${s.id === SEL ? 'sel' : ''}" data-id="${esc(s.id)}" title="${esc(s.projectDir)}">
       <div class="t"><span class="dot ${dot}"></span><span>${esc(s.topic || '(제목 없음)')}</span></div>
-      <div class="s">${esc(base(s.projectDir))} · ${s.mode === 'develop' ? '개발' : '토론'} · R${s.round || 0} · ${esc(STATUS[s.status] || s.status)} · ${ago(s.updatedAt || s.startedAt)}</div></button>`;
+      <div class="s">${esc(base(s.projectDir))} · ${MODE_LABEL[s.mode] || s.mode} · R${s.round || 0} · ${esc(STATUS[s.status] || s.status)} · ${ago(s.updatedAt || s.startedAt)}</div></button>`;
   };
   box.innerHTML = (act.length ? `<div class="sgroup">실행 중 ${act.length}</div>${act.map(item).join('')}` : '')
     + (rest.length ? `<div class="sgroup">기록</div>${rest.map(item).join('')}` : '')
@@ -128,6 +131,7 @@ function showNew() {
 
 async function select(id) {
   SEL = id;
+  endReply();
   save('sel', id);
   try {
     RUN = await api('state?runId=' + encodeURIComponent(id));
@@ -158,8 +162,9 @@ function renderAgents() {
         <span class="ver ${st && !st.ok ? 'bad' : ''}" title="${esc(st ? (st.ok ? st.version : st.error) : '')}">${esc(st ? (st.ok ? st.version : st.error) : '확인 중…')}</span>
         ${fixButtons(id, a, st)}</div>
       <div class="sub">
-        <input data-model="${id}" placeholder="${a.hasModel ? '모델 (기본값)' : '모델 지정 불가'}" value="${esc(saved[id]?.model ?? a.model ?? '')}" ${a.hasModel ? '' : 'disabled'}>
-        <input data-cmd="${id}" value="${esc(a.cmd)}" disabled title="명령은 ⚙ 설정에서 변경">
+        <select data-model="${id}" ${a.hasModel ? '' : 'disabled'} title="모델"></select>
+        <select data-effort="${id}" title="생각 깊이 (effort)"></select>
+        <input class="custom" data-custom="${id}" placeholder="모델 이름 직접 입력" hidden>
         <textarea rows="2" data-role="${id}" placeholder="페르소나">${esc(saved[id]?.role || a.role)}</textarea>
       </div>`;
     box.appendChild(el);
@@ -171,8 +176,52 @@ function renderAgents() {
     x.closest('.agent').classList.toggle('off', !x.checked);
     saveForm(); fillRoleSelects();
   }));
-  box.querySelectorAll('[data-model],[data-role]').forEach((x) => x.addEventListener('change', saveForm));
+  box.querySelectorAll('[data-role],[data-effort],[data-custom]').forEach((x) => x.addEventListener('change', saveForm));
+  box.querySelectorAll('[data-model]').forEach((x) => x.addEventListener('change', () => {
+    const id = x.dataset.model;
+    document.querySelector(`[data-custom="${id}"]`).hidden = x.value !== '__custom';
+    fillEffort(id, saved[id]?.effort);
+    saveForm();
+  }));
+  for (const id of Object.keys(CFG.agents)) {
+    fillModel(id, saved[id]?.model ?? CFG.agents[id].model ?? '');
+    fillEffort(id, saved[id]?.effort ?? CFG.agents[id].effort ?? '');
+    if (!MODELS[id]) {
+      MODELS[id] = { loading: true, models: [], efforts: [] };
+      api('models?agent=' + id).then((m) => {
+        MODELS[id] = m;
+        const cur = formAgents()[id] || {};
+        fillModel(id, cur.model);
+        fillEffort(id, cur.effort);
+      }).catch(() => { MODELS[id] = { models: [], efforts: [] }; });
+    }
+  }
   fillRoleSelects();
+}
+
+// Model and effort are picked from the CLI's own catalog; "직접 입력" stays available for anything else.
+function fillModel(id, value) {
+  const sel = document.querySelector(`[data-model="${id}"]`);
+  if (!sel || !CFG.agents[id].hasModel) { if (sel) sel.innerHTML = '<option value="">모델 지정 불가</option>'; return; }
+  const list = MODELS[id]?.models || [];
+  const known = list.some((m) => m.id === value);
+  sel.innerHTML = `<option value="">기본 모델</option>`
+    + list.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')
+    + (value && !known ? `<option value="${esc(value)}">${esc(value)}</option>` : '')
+    + `<option value="__custom">직접 입력…</option>`;
+  sel.value = value || '';
+  document.querySelector(`[data-custom="${id}"]`).hidden = true;
+}
+function fillEffort(id, value) {
+  const sel = document.querySelector(`[data-effort="${id}"]`);
+  if (!sel) return;
+  const modelId = document.querySelector(`[data-model="${id}"]`)?.value;
+  const model = (MODELS[id]?.models || []).find((m) => m.id === modelId);
+  const efforts = model?.efforts?.length ? model.efforts : (CFG.agents[id].hasEffort ? MODELS[id]?.efforts || [] : []);
+  sel.hidden = !efforts.length;
+  sel.innerHTML = `<option value="">기본 생각 깊이${model?.defaultEffort ? ` (${EFFORT_KO[model.defaultEffort] || model.defaultEffort})` : ''}</option>`
+    + efforts.map((e) => `<option value="${esc(e)}">생각 깊이: ${esc(EFFORT_KO[e] || e)}</option>`).join('');
+  sel.value = efforts.includes(value) ? value : '';
 }
 
 // One-click fixes next to each agent: install the CLI, log in, or set the API key.
@@ -221,7 +270,9 @@ function formAgents() {
   const out = {};
   document.querySelectorAll('#agentsBox input[type=checkbox]').forEach((x) => {
     const id = x.dataset.id;
-    out[id] = { on: x.checked, model: document.querySelector(`[data-model="${id}"]`).value.trim(), role: document.querySelector(`[data-role="${id}"]`).value };
+    const ms = document.querySelector(`[data-model="${id}"]`);
+    const model = ms.value === '__custom' ? document.querySelector(`[data-custom="${id}"]`).value.trim() : ms.value;
+    out[id] = { on: x.checked, model, effort: document.querySelector(`[data-effort="${id}"]`).value, role: document.querySelector(`[data-role="${id}"]`).value };
   });
   return out;
 }
@@ -236,7 +287,7 @@ function restoreForm() {
   for (const f of FIELDS) { const v = load(f); if (v != null) $('#' + f).value = v; }
   for (const c of CHECKS) if (load(c) != null) $('#' + c).checked = load(c);
   if (CFG.language && !load('language')) $('#language').value = CFG.language;
-  setMode(load('mode') || 'debate');
+  setMode(load('mode') || 'auto');
 }
 
 async function start(e) {
@@ -245,12 +296,12 @@ async function start(e) {
   saveForm();
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   const ag = formAgents();
-  const roles = {}, models = {};
-  for (const [id, a] of Object.entries(ag)) { roles[id] = a.role; models[id] = a.model; }
+  const roles = {}, models = {}, efforts = {};
+  for (const [id, a] of Object.entries(ag)) { roles[id] = a.role; models[id] = a.model; efforts[id] = a.effort; }
   $('#startBtn').disabled = true;
   try {
     const { id } = await api('start', {
-      projectDir: $('#projectDir').value, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles, models,
+      projectDir: $('#projectDir').value, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles, models, efforts,
       moderator: $('#moderator').value, worker: $('#worker').value,
       maxRounds: $('#maxRounds').value, planRounds: $('#planRounds').value, language: $('#language').value,
       testCmd: $('#testCmd').value, relentless: $('#relentless').checked, blindOpening: $('#blindOpening').checked,
@@ -271,9 +322,11 @@ async function probe() {
   $('#probeBtn').disabled = true;
   $('#probeResult').className = 'hint';
   $('#probeResult').textContent = `${ids.map(agentLabel).join(', ')}에 실제로 한 줄 질문을 보내는 중… (최대 3분)`;
-  const models = Object.fromEntries(Object.entries(formAgents()).map(([k, v]) => [k, v.model]));
+  const fa = formAgents();
+  const models = Object.fromEntries(Object.entries(fa).map(([k, v]) => [k, v.model]));
+  const efforts = Object.fromEntries(Object.entries(fa).map(([k, v]) => [k, v.effort]));
   try {
-    const res = await api('preflight', { agents: ids, models });
+    const res = await api('preflight', { agents: ids, models, efforts });
     PROBE = { ...PROBE, ...res };
     renderAgents();
     const lines = Object.entries(res).map(([id, r]) => r.ok ? `✅ ${agentLabel(id)} — ${(r.ms / 1000).toFixed(1)}s` : `❌ ${agentLabel(id)} — ${r.hint}\n   ${r.detail.split('\n').pop()}`);
@@ -317,6 +370,21 @@ async function previewIssue() {
 // ---------- session view ----------
 function msgEl(m) {
   const el = document.createElement('div');
+  if (m.kind === 'question') {
+    const answered = RUN?.answers?.[m.id] !== undefined;
+    el.className = 'msg question' + (answered ? ' answered' : '');
+    el.innerHTML = `<div class="mh"><span class="who">❓ ${esc(agentLabel(m.agent))}의 질문</span><span class="tag">R${m.round}</span>
+      <span>${answered ? '✅ 답변함' : '답이 올 때까지 가장 합리적인 가정으로 계속 진행합니다'}</span><span style="margin-left:auto">${hhmm(m.ts)}</span></div>
+      <div class="qtext">${esc(m.text)}</div>`;
+    if (!answered) {
+      const b = document.createElement('button');
+      b.className = 'primary';
+      b.textContent = '답하기';
+      b.onclick = () => startReply(m);
+      el.appendChild(b);
+    }
+    return el;
+  }
   if (m.kind === 'system') {
     el.className = 'msg system';
     el.textContent = m.text;
@@ -344,7 +412,7 @@ function msgEl(m) {
       ${m.durationMs ? `<span>${Math.round(m.durationMs / 1000)}s</span>` : ''}
       ${m.costUsd ? `<span>$${m.costUsd.toFixed(3)}</span>` : ''}
       <span style="margin-left:auto">${hhmm(m.ts)}</span></div>
-    <div class="md">${md(m.text)}</div>`;
+    <div class="md">${md(m.kind === 'agent' ? stripControl(m.text) : m.text)}</div>`;
   if ((m.text || '').length > 1800) {
     el.classList.add('collapsed');
     const b = document.createElement('button');
@@ -354,6 +422,10 @@ function msgEl(m) {
   }
   return el;
 }
+
+// Protocol lines are shown as badges and question cards, so they are hidden from the message body.
+const stripControl = (t) => String(t || '').replace(/^[\s>*-]*(?:\*\*)?(?:VOTE|NEXT|ASK OWNER)(?:\*\*)?\s*[:：].*$/gim, '').replace(/\n{3,}/g, '\n\n').trim();
+const MODE_LABEL = { auto: '자동', debate: '토론', develop: '개발' };
 
 const nearBottom = () => { const s = $('#scroller'); return s.scrollHeight - s.scrollTop - s.clientHeight < 160; };
 const toBottom = (force) => { if (force) $('#scroller').scrollTop = $('#scroller').scrollHeight; };
@@ -415,7 +487,7 @@ function renderRun() {
   $('#publishBtn').disabled = !!r.publishing;
   $('#publishBtn').textContent = r.publishing ? '🐙 게시 중…' : r.published ? '🐙 다시 게시' : (r.mode === 'develop' ? '🐙 push + PR' : '🐙 이슈에 게시');
 
-  const stage = r.mode === 'develop' ? (r.stage === 'plan' ? '계획 단계' : '빌드 단계') : '토론';
+  const stage = r.stage === 'plan' ? '계획 단계' : r.stage === 'build' ? '빌드 단계' : (r.mode === 'auto' ? '토론 단계 (자동)' : '토론');
   const cost = Object.values(r.cost || {}).reduce((a, b) => a + b, 0);
   const agentChip = (a) => {
     const cool = r.cooling?.[a];
@@ -441,6 +513,19 @@ function renderRun() {
   $('#plan').hidden = !r.plan;
   if (r.plan && $('#planBody').dataset.src !== r.plan) { $('#planBody').innerHTML = md(r.plan); $('#planBody').dataset.src = r.plan; }
   liveSync();
+}
+
+function startReply(m) {
+  REPLY_TO = m.id;
+  $('#replyText').textContent = `↩ 질문에 답하는 중: ${m.text}`;
+  $('#replyBar').hidden = false;
+  $('#injectText').placeholder = '답을 적고 Enter';
+  $('#injectText').focus();
+}
+function endReply() {
+  REPLY_TO = null;
+  $('#replyBar').hidden = true;
+  $('#injectText').placeholder = '중재자로 끼어들기 — Enter 전송 · Shift+Enter 줄바꿈 · 끝난 세션에 보내면 이어서 진행';
 }
 
 // ---------- settings ----------
@@ -501,16 +586,18 @@ function connect() {
     if (ev.type === 'alert') {
       const mine = ev.runId === SEL;
       toast(ev.level, ev.text, mine ? '' : ev.topic, () => select(ev.runId));
-      if (ev.level !== 'warn' || /한도/.test(ev.text)) notify(`Council — ${ev.topic}`, ev.text, ev.runId);
+      if (ev.level !== 'warn' || /한도/.test(ev.text)) notify(ev.level === 'ask' ? `Council — 질문이 왔습니다` : `Council — ${ev.topic}`, ev.text, ev.runId);
       return;
     }
     if (!ev.runId || ev.runId !== SEL || !RUN) return;
     const stick = nearBottom();
     if (ev.type === 'run') {
       const wasActive = isActive(RUN);
+      const prevAnswers = JSON.stringify(RUN.answers || {});
       RUN = { ...RUN, ...ev.run };
       renderRun();
-      if (wasActive !== isActive(RUN)) renderFeed(); // rollback buttons appear/disappear
+      // rollback buttons and answered questions change how old messages look
+      if (wasActive !== isActive(RUN) || prevAnswers !== JSON.stringify(RUN.answers || {})) renderFeed();
     } else if (ev.type === 'message') {
       if (!RUN.messages.some((m) => m.id === ev.message.id)) {
         RUN.messages.push(ev.message);
@@ -543,6 +630,7 @@ async function init() {
   $('#probeBtn').onclick = probe;
   $('#setup').addEventListener('submit', start);
   $('#newBtn').onclick = showNew;
+  $('#replyCancel').onclick = endReply;
   $('#settingsBtn').onclick = openSettings;
   $('#saveSecrets').onclick = saveSecretsNow;
   $('#saveConfig').onclick = saveConfigNow;
@@ -561,7 +649,7 @@ async function init() {
     e.preventDefault();
     const t = $('#injectText').value.trim();
     if (!t || !SEL) return;
-    try { await api('inject', { runId: SEL, text: t }); $('#injectText').value = ''; } catch (err) { toast('error', err.message); }
+    try { await api('inject', { runId: SEL, text: t, replyTo: REPLY_TO ?? undefined }); $('#injectText').value = ''; endReply(); } catch (err) { toast('error', err.message); }
   });
   $('#injectText').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); }

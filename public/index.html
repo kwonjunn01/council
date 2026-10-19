@@ -21,7 +21,7 @@
   <main>
     <!-- new session -->
     <section id="setupView" class="view">
-      <form id="setup" class="debate">
+      <form id="setup" class="auto">
         <h2>새 세션</h2>
         <div class="grid-main">
           <div>
@@ -32,13 +32,14 @@
             <div id="ghStatus" class="hint"></div>
 
             <div class="seg" id="modeSeg">
-              <button type="button" data-mode="debate" class="on">💬 토론</button>
-              <button type="button" data-mode="develop">🛠 개발</button>
+              <button type="button" data-mode="auto" class="on">🤖 자동</button>
+              <button type="button" data-mode="debate">💬 토론만</button>
+              <button type="button" data-mode="develop">🛠 바로 개발</button>
             </div>
             <p class="hint" id="modeHint"></p>
 
-            <label>주제 / 미션
-              <textarea id="topic" rows="7" placeholder="예) 이 저장소에 실시간 협업 편집을 넣자. CRDT vs OT, 어떤 구조로?&#10;(GitHub 이슈를 지정하면 비워둬도 됩니다)"></textarea>
+            <label>화두
+              <textarea id="topic" rows="7" placeholder="던지고 싶은 화두를 편하게 적으세요.&#10;예) 이 저장소에 실시간 협업 편집을 넣고 싶어. 어떻게 하는 게 제일 좋을까?&#10;(GitHub 이슈를 지정하면 비워둬도 됩니다)"></textarea>
             </label>
 
             <fieldset>
@@ -69,7 +70,7 @@
               <label class="dev-only">계획 라운드<input id="planRounds" type="number" min="1" value="3"></label>
               <label>응답 언어<input id="language" value="Korean"></label>
             </div>
-            <label class="dev-only">테스트 명령 <small>(매 라운드 자동 실행)</small>
+            <label class="dev-only">테스트 명령 <small>(비워두면 계획에서 자동으로 찾음)</small>
               <input id="testCmd" placeholder="npm test · pytest -q · cargo test">
             </label>
             <label class="check"><input type="checkbox" id="relentless"> <span><b>무자비 모드</b> — 합의해도 멈추지 않고 합의안을 다시 공격·개선</span></label>
@@ -104,6 +105,7 @@
         <div id="feed"></div>
         <div id="live"></div>
       </div>
+      <div id="replyBar" hidden><span id="replyText"></span><button type="button" id="replyCancel" class="icon-btn">✕</button></div>
       <form id="composer">
         <textarea id="injectText" rows="2" placeholder="중재자로 끼어들기 — Enter 전송 · Shift+Enter 줄바꿈 · 끝난 세션에 보내면 이어서 진행"></textarea>
         <button class="primary">전송</button>

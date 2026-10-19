@@ -45,7 +45,25 @@
       "setup": {
         "npm": "@anthropic-ai/claude-code",
         "login": "claude"
-      }
+      },
+      "models": [
+        "fable",
+        "opus",
+        "sonnet",
+        "haiku"
+      ],
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effortArgs": [
+        "--effort",
+        "{effort}"
+      ],
+      "effort": ""
     },
     "deepseek": {
       "label": "DeepSeek",
@@ -95,7 +113,11 @@
       "setup": {
         "npm": "@anthropic-ai/claude-code",
         "key": "DEEPSEEK_API_KEY"
-      }
+      },
+      "models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ]
     },
     "codex": {
       "label": "Codex",
@@ -142,7 +164,23 @@
       "setup": {
         "npm": "@openai/codex",
         "login": "codex login"
-      }
+      },
+      "modelsCmd": [
+        "debug",
+        "models"
+      ],
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effortArgs": [
+        "-c",
+        "model_reasoning_effort={effort}"
+      ],
+      "effort": ""
     },
     "gemini": {
       "label": "Gemini",
@@ -176,7 +214,16 @@
       "setup": {
         "npm": "@google/gemini-cli",
         "login": "gemini"
-      }
+      },
+      "models": [
+        "auto",
+        "pro",
+        "flash",
+        "flash-lite",
+        "gemini-3-pro-preview",
+        "gemini-3.5-flash",
+        "gemini-2.5-pro"
+      ]
     }
   },
   "preflight": true,
@@ -192,5 +239,11 @@
     30,
     60
   ],
-  "maxConcurrentSessions": 4
+  "maxConcurrentSessions": 4,
+  "escalationOrder": [
+    "claude",
+    "codex",
+    "gemini"
+  ],
+  "escalateAfterFailedTests": 2
 }

@@ -121,6 +121,55 @@ async function main() {
   assert.ok(q.includes('codex:implement') && !q.includes('deepseek:implement'), q.join(', '));
   console.log('✓ DeepSeek down → Codex implements');
 
+  // 1d. auto mode: just a topic → debate → council decides to build → plan → DeepSeek implements; a question comes back to the owner
+  const au = tempRepo('auto');
+  id = await c.start({ projectDir: au, mode: 'auto', topic: '할 일 앱이 필요할까?', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 10, efforts: { claude: 'high' } });
+  for (let i = 0; i < 200 && !(await c.state(id)).messages.some((m) => m.kind === 'question'); i++) await sleep(100);
+  s = await c.state(id);
+  const qm = s.messages.find((m) => m.kind === 'question');
+  assert.ok(qm, 'the moderator should ask the owner a question');
+  assert.strictEqual((await c.post('inject', { runId: id, text: '로컬 JSON 파일로 해줘', replyTo: qm.id })).status, 200);
+  s = await c.waitDone(id);
+  q = phases(s);
+  assert.strictEqual(s.status, 'done', sysText(s));
+  assert.strictEqual(s.mode, 'develop', 'auto mode should switch to building');
+  assert.strictEqual(s.answers[qm.id] !== undefined, true, 'answer should be linked to the question');
+  assert.ok(s.messages.some((m) => m.kind === 'user' && m.replyTo === qm.id));
+  assert.ok(!q.some((x) => /^deepseek:(opening|debate|brief)$/.test(x)), 'executor stays out of the debate');
+  assert.ok(q.includes('claude:plan-final') && q.includes('deepseek:implement'), q.join(', '));
+  assert.strictEqual(s.testCmd, 'node --version', 'test command should be picked up from the plan');
+  assert.ok(s.messages.filter((m) => m.agent === 'claude' && m.kind === 'agent').every((m) => m.effort === 'high'));
+  console.log('✓ auto mode: debate → build, question answered, effort applied');
+
+  process.env.COUNCIL_MOCK_NEXT = 'TALK';
+  id = await c.start({ projectDir: tempRepo('talk'), mode: 'auto', topic: '그냥 의견만', agents: four, maxRounds: 6 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_NEXT;
+  assert.strictEqual(s.mode, 'auto');
+  assert.ok(!phases(s).some((x) => x.endsWith(':implement')), 'TALK must not build');
+  console.log('✓ auto mode: talk only');
+
+  // 1e. the moderator assigns a stronger model for one round, then work returns to DeepSeek
+  Object.assign(process.env, { COUNCIL_MOCK_ASSIGN: 'Claude', COUNCIL_MOCK_ASSIGN_ROUND: '2' });
+  id = await c.start({ projectDir: tempRepo('assign'), mode: 'develop', topic: 'assign drill', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 8, planRounds: 1 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_ASSIGN; delete process.env.COUNCIL_MOCK_ASSIGN_ROUND;
+  q = s.messages.filter((m) => m.phase === 'implement' && m.ok).map((m) => `R${m.round}:${m.agent}`);
+  assert.ok(q.includes('R2:deepseek') && q.includes('R3:claude'), q.join(', '));
+  assert.match(sysText(s), /고급 모델 투입: Claude.*디자인 품질/);
+  console.log(`✓ moderator ASSIGN → stronger model for one round (${q.join(' ')})`);
+
+  // 1f. tests fail twice in a row with DeepSeek → a stronger model steps in automatically
+  id = await c.start({ projectDir: tempRepo('escalate'), mode: 'develop', topic: 'escalation drill', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 8, planRounds: 1,
+    testCmd: `node -e "process.exit(require('fs').existsSync('mock-claude.txt')?0:1)"` });
+  s = await c.waitDone(id);
+  q = s.messages.filter((m) => m.phase === 'implement' && m.ok).map((m) => m.agent);
+  assert.strictEqual(s.status, 'done', sysText(s));
+  assert.deepStrictEqual(q.slice(0, 3), ['deepseek', 'deepseek', 'claude'], q.join(', '));
+  assert.match(sysText(s), /테스트가 2라운드 연속 실패/);
+  assert.ok(s.messages.some((m) => m.kind === 'test' && m.ok), 'tests should pass after escalation');
+  console.log('✓ two failing test rounds → Claude steps in');
+
   // 2. debate + interjection continues a finished session
   const deb = tempRepo('debate');
   id = await c.start({ projectDir: deb, mode: 'debate', topic: 'CRDT vs OT?', agents: three, maxRounds: 2 });
