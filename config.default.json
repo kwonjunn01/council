@@ -36,7 +36,7 @@
       },
       "input": "stdin",
       "parser": "claude-stream-json",
-      "role": "Architect & critic: design soundness, edge cases, correctness, long-term maintainability.",
+      "role": "설계자·비평가: 설계의 타당성, 예외 상황, 정확성, 장기 유지보수성을 따진다.",
       "modelArgs": [
         "--model",
         "{model}"
@@ -81,7 +81,7 @@
       },
       "input": "stdin",
       "parser": "claude-stream-json",
-      "role": "Main implementer: writes complete, working code fast; follows the agreed plan and the moderator's work order to the letter; runs the tests.",
+      "role": "메인 구현자: 합의된 계획과 모더레이터의 작업 지시를 그대로 따라 완성도 높은 코드를 빠르게 쓰고 테스트를 돌린다.",
       "modelArgs": [
         "--model",
         "{model}"
@@ -125,7 +125,7 @@
       "input": "stdin",
       "parser": "text",
       "finalFrom": "lastMessageFile",
-      "role": "Rigorous code reviewer: correctness, tests, performance, security; runs the code to verify claims.",
+      "role": "엄격한 코드 리뷰어: 정확성, 테스트, 성능, 보안을 보고 직접 코드를 실행해 주장을 검증한다.",
       "modelArgs": [
         "-m",
         "{model}"
@@ -155,7 +155,7 @@
       },
       "input": "stdin",
       "parser": "text",
-      "role": "Devil's advocate & researcher: challenge assumptions, bring alternatives, prior art and outside knowledge.",
+      "role": "반대 측 논객·리서처: 전제를 의심하고 대안과 선행 사례, 외부 지식을 가져온다.",
       "modelArgs": [
         "-m",
         "{model}"

@@ -317,7 +317,7 @@ function msgEl(m) {
   el.innerHTML = `<div class="mh"><span class="who">${esc(who)}</span>
       ${role ? `<span class="tag role">${esc(role)}</span>` : ''}
       <span class="tag">R${m.round}${m.phase ? ' · ' + esc(PHASE[m.phase] || m.phase) : ''}</span>
-      ${m.vote ? `<span class="vote ${m.vote}">${m.vote}</span>` : ''}
+      ${m.vote ? `<span class="vote ${m.vote}">${m.vote === 'AGREE' ? '동의' : '계속'}</span>` : ''}
       ${m.model ? `<span>${esc(m.model)}</span>` : ''}
       ${m.durationMs ? `<span>${Math.round(m.durationMs / 1000)}s</span>` : ''}
       ${m.costUsd ? `<span>$${m.costUsd.toFixed(3)}</span>` : ''}
