@@ -207,6 +207,7 @@
       },
       "input": "agy-json",
       "parser": "agy-stream-json",
+      "readNote": "Note: in this turn shell commands are blocked, and trying one ends your turn with no answer. Use only file viewing and search tools, then write your answer.",
       "role": "반대 측 논객·리서처: 전제를 의심하고 대안과 선행 사례, 외부 지식을 가져온다.",
       "modelArgs": [
         "--model",
