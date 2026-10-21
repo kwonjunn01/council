@@ -30,6 +30,16 @@ function sendJson(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// Only the loopback name the server actually listens on may drive it: blocks DNS-rebinding hosts.
+function hostAllowed(req) {
+  const host = String(req.headers.host || '');
+  const localPort = req.socket.localPort;
+  const m = host.match(/^(127\.0\.0\.1|localhost|\[::1\])(?::(\d+))?$/i);
+  if (!m) return false;
+  if (m[2]) return Number(m[2]) === localPort;
+  return localPort === 80;
+}
+
 function checkAgent(a) {
   return new Promise((resolve) => {
     const IS_WIN = process.platform === 'win32';
@@ -113,6 +123,7 @@ function createServer({ mock = false } = {}) {
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    if (!hostAllowed(req)) return sendJson(res, 403, { error: 'forbidden: bad Host header' });
     try {
       if (url.pathname === '/events') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
