@@ -773,7 +773,8 @@ function renderContract() {
   const c = r.contract || {};
   const words = (c.ownerWords || []).filter(Boolean);
   const acceptance = (c.acceptance || []).map((a) => (typeof a === 'string' ? { done: false, text: a } : a));
-  const has = words.length || c.goal || acceptance.length || (c.assumptions || []).length || (c.openFindings || []).length;
+  const has = words.length || c.goal || acceptance.length || (c.assumptions || []).length || (c.openFindings || []).length
+    || c.currentTask || (c.completedTasks || []).length;
   box.hidden = !has;
   if (!has) return;
   const key = JSON.stringify(c);
@@ -782,11 +783,20 @@ function renderContract() {
   const clip = (s) => { s = String(s); return s.length > 2000 ? s.slice(0, 2000) + '…' : s; };
   // Only the last few messages: older ones are already folded into goal/acceptance.
   const quotes = words.slice(-6).map((w) => `<blockquote>${esc(clip(w))}</blockquote>`).join('');
+  const task = c.currentTask || null;
+  const doneTasks = c.completedTasks || [];
+  const taskState = task && task.status === 'blocked' ? '<span class="bad">막힘 — 모더레이터 확인 대기</span>'
+    : task && task.status === 'revise' ? '<span class="bad">수정 지시 — 같은 작업을 이어서</span>' : '';
   $('#contractBody').innerHTML = `
     ${quotes ? `<div class="cquote"><div class="clabel">내가 한 말 — 그대로</div>${quotes}</div>` : ''}
     ${c.goal ? `<div class="cline"><b>목표</b> ${esc(c.goal)}</div>` : ''}
     ${(c.assumptions || []).length ? `<div class="cline"><b class="assume">가정 — 모델의 해석</b><ul class="assume">${c.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
     ${acceptance.length ? `<div class="cline"><b>수용 기준</b><ul class="accept">${acceptance.map((a) => `<li class="${a.done ? 'done' : ''}">${a.done ? '☑' : '☐'} ${esc(a.text)}</li>`).join('')}</ul></div>` : ''}
+    ${task ? `<div class="cline"><b>현재 작은 작업 · ${esc(task.id)}</b> ${esc(task.title)} ${taskState}
+      ${task.scope ? `<div class="muted">범위: ${esc(task.scope)}</div>` : ''}
+      ${(task.checks || []).length ? `<ul class="accept">${task.checks.map((ch) => `<li class="${ch.done ? 'done' : ''}">${ch.done ? '☑' : '☐'} ${esc(ch.text)}</li>`).join('')}</ul>` : ''}
+      ${task.attempts ? `<div class="muted">시도 ${task.attempts + 1}회</div>` : ''}</div>` : ''}
+    ${doneTasks.length ? `<div class="cline"><b>완료한 작은 작업 ${doneTasks.length}</b><ul>${doneTasks.map((t) => `<li>✓ ${esc(t.id)} ${esc(t.title)}${t.sha ? ` <code>${esc(String(t.sha).slice(0, 8))}</code>` : ''}${t.round ? ` <span class="muted">R${t.round}</span>` : ''}</li>`).join('')}</ul></div>` : ''}
     ${(c.openFindings || []).length ? `<div class="cline"><b>열린 지적 ${c.openFindings.length}</b><ul class="ofind">${c.openFindings.map((f) => `<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
     ${c.needsRevision ? '<div class="crev">⚠ 새로 남긴 말이 아직 계약에 반영되지 않았습니다 — 다음 정리에서 갱신됩니다.</div>' : ''}`;
 }

@@ -97,6 +97,8 @@ async function main() {
   const legacy = Session.load(loadConfig({ mock: true }), legacyDir);
   assert.strictEqual(legacy.verification(), 'unverified');
   assert.deepStrictEqual(legacy.r.contract.ownerWords, ['old session'], 'legacy topics become the first owner words');
+  assert.strictEqual(legacy.r.contract.currentTask, null, 'a legacy session has no open task');
+  assert.deepStrictEqual(legacy.r.contract.completedTasks, [], 'a legacy session has no completed task ledger');
   const pkgRepo = tempRepo('pkgdetect');
   fs.writeFileSync(path.join(pkgRepo, 'package.json'), JSON.stringify({ scripts: { test: 'node --version' } }));
   assert.strictEqual(detectTestCmd(pkgRepo), 'npm test');
@@ -111,6 +113,20 @@ async function main() {
   }
   assert.strictEqual(planTestCmd('## Test command\nRun `npm test` before merging.'), 'npm test', 'a command on the line after the heading is found');
   assert.strictEqual(planTestCmd('Test command: `<the command>`'), null, 'a placeholder is not a command');
+  // Prose that merely mentions a test command must not become the command that is executed.
+  assert.strictEqual(planTestCmd('Test command auto-detection reads `package.json` and picks the script'), null, 'prose is not a command');
+  assert.strictEqual(planTestCmd('The council discussed the test command: `rm -rf /` at length'), null, 'an embedded label is not a command');
+  // The shape of this session's own PLAN.md: prose about detection above the real section.
+  const livePlan = [
+    '# Final build plan',
+    '## Milestones',
+    '- Test command auto-detection runs when the plan names none: a real `package.json` `scripts.test`.',
+    '## Test command',
+    '',
+    'Test command: `npm test`',
+  ].join('\n');
+  assert.strictEqual(planTestCmd(livePlan), 'npm test', 'the real section wins over prose that mentions package.json');
+  assert.strictEqual(planTestCmd('## Test command\n'), null, 'a heading with no command is not a command');
   const badHost = await new Promise((resolve, reject) => {
     const u = new URL(base);
     const req = http.request({ host: u.hostname, port: u.port, path: '/api/config', headers: { Host: 'evil.example' } }, (res) => { res.resume(); resolve(res.statusCode); });
@@ -552,6 +568,80 @@ async function main() {
   await c.post('stop', { runId: id, hard: true });
   await c.waitDone(id, 10000);
   console.log('✓ contract: malformed keeps previous, owner injection invalidates acceptance');
+
+  // 3g. owner R5: one small moderator-gated task at a time, approved before the next begins
+  process.env.COUNCIL_MOCK_TASKS = '1';
+  id = await c.start({ projectDir: tempRepo('tasks'), mode: 'develop', topic: 'task loop', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 8, planRounds: 1, testCmd: 'node --version' });
+  s = await c.waitDone(id);
+  // (a) the worker sees the one current task, its scope and checks, and is never told to batch milestones
+  const impl2 = trustPromptOf(s, /-R2-codex-implement\.prompt\.md$/);
+  assert.match(impl2, /Current task: T1 — mock task T1/, 'the implement prompt names the one current task');
+  assert.match(impl2, /Task scope: mock\/task-T1\.txt/, 'the implement prompt carries the task scope');
+  assert.match(impl2, /Task checks:[\s\S]*- \[ \] mock check T1/, 'the implement prompt carries the task checks');
+  assert.match(impl2, /WORKER_STATUS: BLOCKED/, 'the worker is told how to hand a blocked task back');
+  assert.ok(!impl2.includes('next unchecked milestone'), 'the worker must not be invited to batch milestones');
+  // (b) APPROVE completes the task with a sha and the next prompt lists it as completed
+  assert.strictEqual(s.outcome, 'agreed', sysText(s));
+  assert.deepStrictEqual(s.contract.completedTasks.map((x) => x.id), ['T1', 'T2'], JSON.stringify(s.contract.completedTasks));
+  assert.ok(s.contract.completedTasks.every((x) => /^[0-9a-f]{7,40}$/.test(x.sha || '')), 'every approved task records the revision it was approved on');
+  assert.strictEqual(s.contract.currentTask, null, 'Task: none leaves no open task');
+  const impl3 = trustPromptOf(s, /-R3-codex-implement\.prompt\.md$/);
+  assert.match(impl3, /Completed tasks[\s\S]*T1 ✓ mock task T1/, 'the next prompt lists the completed task');
+  assert.match(impl3, /Current task: T2 — mock task T2/, 'the next prompt names the next task only');
+  assert.match(trustPromptOf(s, /-R2-claude-work-order\.prompt\.md$/), /Current task: T1 — mock task T1/, 'the moderator judges the task that was just done');
+  assert.match(sysText(s), /작은 작업 T1 승인/);
+  // (g) completed tasks survive a resume
+  const completedBefore = s.contract.completedTasks.map((x) => x.id);
+  assert.strictEqual((await c.post('continue', { runId: id })).status, 200);
+  s = await c.waitDone(id);
+  assert.deepStrictEqual(s.contract.completedTasks.map((x) => x.id).slice(0, completedBefore.length), completedBefore, 'completed tasks survive resume');
+  assert.match(trustPromptOf(s, /-R4-codex-implement\.prompt\.md$/), /Completed tasks[\s\S]*T1 ✓/, 'a resumed worker sees the completed ledger');
+
+  // (c) REVISE keeps the same task and records the attempt; two revisions in a row mark it blocked
+  process.env.COUNCIL_MOCK_REVISE_ROUNDS = '2,3';
+  id = await c.start({ projectDir: tempRepo('taskrevise'), mode: 'develop', topic: 'task revise', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 6, planRounds: 1, testCmd: 'node --version' });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_REVISE_ROUNDS;
+  const t1 = s.contract.completedTasks.find((x) => x.id === 'T1');
+  assert.ok(t1, JSON.stringify(s.contract.completedTasks));
+  assert.strictEqual(t1.attempts, 2, 'both revisions are recorded on the task that was finally approved');
+  assert.strictEqual(s.contract.currentTask, null);
+  const impl3r = trustPromptOf(s, /-R3-codex-implement\.prompt\.md$/);
+  assert.match(impl3r, /Current task: T1 — mock task T1/, 'a revised task keeps its id');
+  assert.match(impl3r, /moderator asked for changes to T1/, 'the worker is told the task was sent back');
+  assert.match(trustPromptOf(s, /-R4-claude-work-order\.prompt\.md$/), /The worker is stuck on T1/, 'two revisions in a row are a blocked task');
+  assert.match(sysText(s), /작은 작업 T1 수정 지시/);
+  assert.match(sysText(s), /작은 작업 T1 막힘/);
+
+  // (d) a worker that reports itself blocked hands the task back to the moderator with what was tried
+  process.env.COUNCIL_MOCK_BLOCKED = '1';
+  id = await c.start({ projectDir: tempRepo('taskblocked'), mode: 'develop', topic: 'task blocked', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 5, planRounds: 1, testCmd: 'node --version' });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_BLOCKED;
+  assert.match(sysText(s), /작은 작업 T1 막힘/);
+  assert.match(trustPromptOf(s, /-R2-claude-work-order\.prompt\.md$/), /The worker is stuck on T1: tried the mock fix does not satisfy/, 'the moderator sees what was tried');
+  assert.match(trustPromptOf(s, /-R2-claude-work-order\.prompt\.md$/), /remaining the mock test still fails/, 'the moderator sees what remains');
+
+  // (e) unanimous AGREE cannot end the project while a task is still open
+  process.env.COUNCIL_MOCK_TASKS = 'hold';
+  id = await c.start({ projectDir: tempRepo('taskhold'), mode: 'develop', topic: 'task hold', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 4, planRounds: 1, testCmd: 'node --version' });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_TASKS;
+  assert.strictEqual(s.outcome, 'round_limit', sysText(s));
+  assert.ok(s.contract.currentTask, 'the open task is still recorded');
+  assert.ok(sysText(s).includes('아직 승인되지 않아 합의를 보류'), sysText(s));
+
+  // (f) code refuses to approve a task in a round whose tests failed
+  process.env.COUNCIL_MOCK_TASKS = '1';
+  id = await c.start({ projectDir: tempRepo('taskred'), mode: 'develop', topic: 'task red', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 4, planRounds: 1, testCmd: 'node -e "process.exit(1)"' });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_TASKS;
+  assert.strictEqual(s.verification, 'failed');
+  assert.deepStrictEqual(s.contract.completedTasks, [], 'a failed test round never approves a task');
+  assert.strictEqual(s.contract.currentTask?.id, 'T1');
+  assert.ok(['revise', 'blocked'].includes(s.contract.currentTask.status), s.contract.currentTask.status);
+  console.log('✓ moderator-gated tasks: scope/checks in prompts, approve→next, revise, blocked, no AGREE with an open task, resume');
+
 
   // 4. failure drills: Gemini hits a usage limit, Codex has a network blip while implementing
   // maxRounds is generous: rounds keep going without consensus until Gemini's cooldown ends, however fast the machine.

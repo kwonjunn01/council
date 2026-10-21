@@ -63,6 +63,22 @@ process.stdin.on('data', (d) => { input += d; }).on('end', async () => {
     if (process.env.COUNCIL_MOCK_CONTRACT === '0') say('\n## Contract\n(this block is malformed on purpose)\n');
     else say(`\n## Contract\nGoal: ${process.env.COUNCIL_MOCK_GOAL || 'mock goal: ship the requested change'}\nAssumptions:\n- mock assumption\nAcceptance:\n- [ ] mock acceptance: the change works\n`);
   }
+  // Task ledger drill: one small moderator-gated task per round. COUNCIL_MOCK_TASKS=hold never closes the ledger.
+  const TASKS = process.env.COUNCIL_MOCK_TASKS;
+  if (TASKS && ['plan-final', 'work-order'].includes(phase)) {
+    const cur = (input.match(/^Current task: (T\d+)/m) || [])[1] || null;
+    const next = `T${(Number(String(cur || 'T0').replace(/\D/g, '')) || 0) + 1}`;
+    if (phase === 'plan-final') say(`Task: T1 — mock task T1\nTask scope: mock/task-T1.txt\nTask checks:\n- [ ] mock check T1\n`);
+    else {
+      const reviseRounds = (process.env.COUNCIL_MOCK_REVISE_ROUNDS || '').split(',').filter(Boolean).map(Number);
+      const revise = reviseRounds.includes(round);
+      say(`\nTASK_VERDICT: ${revise ? `REVISE — mock: check ${cur || 'T1'} is not met yet` : 'APPROVE'}\n`);
+      // Agreeing without closing the task is the drill for "unanimous AGREE must not end the project".
+      if (!revise && TASKS !== 'hold' && round >= 3) say('Task: none\n');
+      else say(`Task: ${next} — mock task ${next}\nTask scope: mock/task-${next}.txt\nTask checks:\n- [ ] mock check ${next}\n`);
+    }
+  }
+  if (phase === 'implement' && process.env.COUNCIL_MOCK_BLOCKED === '1') say('\nWORKER_STATUS: BLOCKED — the mock fix does not satisfy the check / the mock test still fails\n');
   // Findings carry-over drill: report once, then FIXED when the next round's prompt carries it.
   if (phase === 'review' && process.env.COUNCIL_MOCK_FINDING) {
     const finding = process.env.COUNCIL_MOCK_FINDING;

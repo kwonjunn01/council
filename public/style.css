@@ -244,6 +244,8 @@ ul.accept, ul.ofind { list-style: none; padding-left: 4px; margin: 3px 0; }
 .accept li.done { color: var(--ok); }
 .ofind li { color: var(--warn); }
 .crev { color: var(--warn); font-size: 12.5px; margin-top: 6px; }
+.cline .bad { color: var(--danger); }
+.cline .muted { color: var(--muted); }
 
 details.checkpoint { display: inline-block; text-align: left; max-width: 100%; }
 details.checkpoint summary { cursor: pointer; }
