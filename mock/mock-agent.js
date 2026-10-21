@@ -63,19 +63,36 @@ process.stdin.on('data', (d) => { input += d; }).on('end', async () => {
     if (process.env.COUNCIL_MOCK_CONTRACT === '0') say('\n## Contract\n(this block is malformed on purpose)\n');
     else say(`\n## Contract\nGoal: ${process.env.COUNCIL_MOCK_GOAL || 'mock goal: ship the requested change'}\nAssumptions:\n- mock assumption\nAcceptance:\n- [ ] mock acceptance: the change works\n`);
   }
-  // Task ledger drill: one small moderator-gated task per round. COUNCIL_MOCK_TASKS=hold never closes the ledger.
+  // Task ledger drill: one small moderator-gated task per round. It is on by default in develop mode,
+  // so every build e2e goes through the real gate. COUNCIL_MOCK_TASKS=0 disables it, =hold never closes the ledger.
   const TASKS = process.env.COUNCIL_MOCK_TASKS;
-  if (TASKS && ['plan-final', 'work-order'].includes(phase)) {
-    const cur = (input.match(/^Current task: (T\d+)/m) || [])[1] || null;
-    const next = `T${(Number(String(cur || 'T0').replace(/\D/g, '')) || 0) + 1}`;
-    if (phase === 'plan-final') say(`Task: T1 — mock task T1\nTask scope: mock/task-T1.txt\nTask checks:\n- [ ] mock check T1\n`);
-    else {
-      const reviseRounds = (process.env.COUNCIL_MOCK_REVISE_ROUNDS || '').split(',').filter(Boolean).map(Number);
-      const revise = reviseRounds.includes(round);
-      say(`\nTASK_VERDICT: ${revise ? `REVISE — mock: check ${cur || 'T1'} is not met yet` : 'APPROVE'}\n`);
-      // Agreeing without closing the task is the drill for "unanimous AGREE must not end the project".
-      if (!revise && TASKS !== 'hold' && round >= 3) say('Task: none\n');
-      else say(`Task: ${next} — mock task ${next}\nTask scope: mock/task-${next}.txt\nTask checks:\n- [ ] mock check ${next}\n`);
+  const taskMode = TASKS === '0' ? 'off' : TASKS === 'hold' ? 'hold' : 'on';
+  if (taskMode !== 'off' && ['plan-final', 'work-order'].includes(phase)) {
+    const block = (id) => `Task: ${id} — mock task ${id}\nTask scope: mock/task-${id}.txt\nTask checks:\n- [ ] mock check ${id}\n`;
+    const bad = process.env.COUNCIL_MOCK_BADTASK === '1';
+    if (phase === 'plan-final') {
+      say(`\n${bad ? 'Task: T1 — do everything\n' : block('T1')}`);
+    } else {
+      const cur = (input.match(/^Current task: (T\d+)/m) || [])[1] || null;
+      const baseId = cur || 'T1';
+      const next = `T${(Number(String(cur || 'T0').replace(/\D/g, '')) || 0) + 1}`;
+      const rounds = (env) => (process.env[env] || '').split(',').filter(Boolean).map(Number);
+      const revise = rounds('COUNCIL_MOCK_REVISE_ROUNDS').includes(round);
+      const split = rounds('COUNCIL_MOCK_SPLIT_ROUNDS').includes(round);
+      // A blocked task is descoped the way the moderator prompt tells it to: by default when the block came
+      // from failing tests (revision loops keep their attempts), or in a round the drill names with DESCOPE_ROUNDS.
+      const stuckLine = /The worker is stuck on T\d+/.test(input);
+      const descope = /The worker is stuck on T\d+: tried 테스트가/.test(input)
+        || (stuckLine && rounds('COUNCIL_MOCK_DESCOPE_ROUNDS').includes(round));
+      say(`\nTASK_VERDICT: ${revise || split || descope ? `REVISE — mock: check ${baseId} is not met yet` : 'APPROVE'}\n`);
+      if (bad) say('Task: T1 — do everything\n');
+      else if (process.env.COUNCIL_MOCK_NONEXT === '1') { /* approval with no next block: the task must stay open */ }
+      else if (process.env.COUNCIL_MOCK_RESTATE_COMPLETED === '1' && cur) say(block(cur));
+      else if (split) say(block(`${baseId}a`));
+      else if (descope) say(`Task: ${baseId} — mock task ${baseId} (descoped)\nTask scope: mock/descoped-${baseId}.txt\nTask checks:\n- [ ] mock check ${baseId} descoped\n`);
+      else if (revise) say(block(baseId));
+      else if (taskMode !== 'hold' && round >= 3) say('Task: none\n');
+      else say(block(next));
     }
   }
   if (phase === 'implement' && process.env.COUNCIL_MOCK_BLOCKED === '1') say('\nWORKER_STATUS: BLOCKED — the mock fix does not satisfy the check / the mock test still fails\n');
