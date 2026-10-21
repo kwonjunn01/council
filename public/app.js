@@ -788,11 +788,14 @@ function renderContract() {
   const deferredTasks = c.deferredTasks || [];
   const droppedTasks = c.droppedTasks || [];
   const gate = c.taskGate || (task ? (task.status === 'blocked' ? 'blocked' : 'active') : 'awaiting');
-  // "모든 작업 완료" is only true when nothing unfinished is still deferred.
+  // The state of the open task leads; the deferred-work warning only applies when nothing is being worked on (T1 rev 4, item 6).
   const gateLabel = gate === 'closed' && !deferredTasks.length ? '<span class="hint ok">모든 작업 완료</span>'
-    : deferredTasks.length ? '<span class="bad">보류한 작업이 남아 있음 — 다시 맡기거나 제외해야 합니다</span>'
-      : gate === 'blocked' ? '<span class="bad">작업 막힘 — 모더레이터 판단 대기</span>'
-        : gate === 'awaiting' ? '<span class="muted">작업 배정 대기</span>' : '<span class="muted">작업 진행 중</span>';
+    : task ? (task.status === 'blocked' ? '<span class="bad">작업 막힘 — 모더레이터 판단 대기</span>'
+      : gate === 'awaiting' ? '<span class="muted">작업 배정 대기 — 모더레이터 판단 대기</span>'
+        : '<span class="muted">작업 진행 중</span>')
+      : deferredTasks.length ? '<span class="bad">보류한 작업이 남아 있음 — 다시 맡기거나 제외해야 합니다</span>'
+        : gate === 'blocked' ? '<span class="bad">작업 막힘 — 모더레이터 판단 대기</span>'
+          : '<span class="muted">작업 배정 대기</span>';
   const taskState = task && task.status === 'blocked' ? '<span class="bad">막힘 — 모더레이터 확인 대기</span>'
     : task && task.status === 'revise' ? '<span class="bad">수정 지시 — 같은 작업을 이어서</span>' : '';
   $('#contractBody').innerHTML = `
@@ -805,7 +808,7 @@ function renderContract() {
       ${task.scope ? `<div class="muted">범위: ${esc(task.scope)}</div>` : ''}
       ${(task.checks || []).length ? `<ul class="accept">${task.checks.map((ch) => `<li class="${ch.done ? 'done' : ''}">${ch.done ? '☑' : '☐'} ${esc(ch.text)}</li>`).join('')}</ul>` : ''}
       ${task.status === 'blocked' && task.blocked ? `<div class="bad">시도: ${esc(task.blocked.tried || '')}${task.blocked.remaining ? ` · 남은 것: ${esc(task.blocked.remaining)}` : ''}</div>` : ''}
-      ${task.status === 'revise' && task.note ? `<div class="muted">사유: ${esc(task.note)}</div>` : ''}
+      ${(task.status === 'revise' || gate === 'awaiting') && task.note ? `<div class="muted">사유: ${esc(task.note)}</div>` : ''}
       ${task.splitFrom ? `<div class="muted">${esc(task.splitFrom)}에서 나눈 작업</div>` : ''}
       ${task.attempts ? `<div class="muted">시도 ${task.attempts + 1}회</div>` : ''}</div>` : ''}
     ${deferredTasks.length ? `<div class="cline"><b>보류한 작업 ${deferredTasks.length}</b><ul class="muted">${deferredTasks.map((t) => `<li>${esc(t.id)} — ${esc(t.title)} <span class="muted">(미완료${t.splitInto?.length ? `, ${esc(t.splitInto.join(', '))}(으)로 나눔` : ''})</span></li>`).join('')}</ul></div>` : ''}

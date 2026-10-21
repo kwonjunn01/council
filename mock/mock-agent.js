@@ -68,31 +68,44 @@ process.stdin.on('data', (d) => { input += d; }).on('end', async () => {
   const TASKS = process.env.COUNCIL_MOCK_TASKS;
   const taskMode = TASKS === '0' ? 'off' : TASKS === 'hold' ? 'hold' : 'on';
   if (taskMode !== 'off' && ['plan-final', 'work-order'].includes(phase)) {
-    const block = (id) => `Task: ${id} — mock task ${id}\nTask scope: mock/task-${id}.txt\nTask checks:\n- [ ] mock check ${id}\n`;
+    const rounds = (env) => (process.env[env] || '').split(',').filter(Boolean).map(Number);
+    const twoChecks = process.env.COUNCIL_MOCK_TWO_CHECKS === '1';
+    const block = (tid, title) => `Task: ${tid} — ${title || `mock task ${tid}`}\nTask scope: mock/task-${tid}.txt\nTask checks:\n- [ ] mock check ${tid}\n${twoChecks ? `- [ ] mock second check ${tid}\n` : ''}`;
     const bad = process.env.COUNCIL_MOCK_BADTASK === '1';
     if (phase === 'plan-final') {
       say(`\n${bad ? 'Task: T1 — do everything\n' : block('T1')}`);
     } else {
       const cur = (input.match(/^Current task: (T\d+[a-z]?)/m) || [])[1] || null;
       const deferred = (input.match(/^Deferred \(unfinished, split\) tasks[\s\S]*?\n-\s*(T\d+[a-z]?)/m) || [])[1] || null;
+      const completed = (input.match(/^Completed tasks[\s\S]*?\n-\s*(T\d+[a-z]?)/m) || [])[1] || null;
       const baseId = cur || 'T1';
       const next = `T${(Number(String(cur || 'T0').replace(/\D/g, '')) || 0) + 1}`;
-      const rounds = (env) => (process.env[env] || '').split(',').filter(Boolean).map(Number);
       const revise = rounds('COUNCIL_MOCK_REVISE_ROUNDS').includes(round);
       const split = rounds('COUNCIL_MOCK_SPLIT_ROUNDS').includes(round);
       // A stuck task is never approved: it is split or descoped so the worker gets a concrete, smaller order.
       // The block itself is the signal, so the same round cannot descope twice (the second order would be unchanged).
       const stuckLine = /The worker is stuck on T\d+/.test(input);
       const descope = stuckLine;
+      // Drills for the ledger invariant: a title-only order must not release a block, a rejected split must not erase
+      // the parent, an id-only resume must restore the deferred parent's requirements, and a no-verdict restatement
+      // must not open the gate.
+      const titleOnly = rounds('COUNCIL_MOCK_TITLE_ONLY').includes(round);
+      const splitToCompleted = process.env.COUNCIL_MOCK_SPLIT_TO_COMPLETED === '1';
+      const resume = process.env.COUNCIL_MOCK_RESUME === '1' && deferred && !cur;
+      const noverdict = rounds('COUNCIL_MOCK_NOVERDICT_ROUNDS').includes(round);
+      const nonext = process.env.COUNCIL_MOCK_NONEXT === '1' || rounds('COUNCIL_MOCK_NONEXT_ROUNDS').includes(round);
       // A deferred split parent blocks Task: none until the moderator resolves it explicitly.
       if (process.env.COUNCIL_MOCK_DROP === '1' && deferred) say(`\nTASK_DROP: ${deferred} — mock: excluded from this round\n`);
-      say(`\nTASK_VERDICT: ${revise || split || descope ? `REVISE — mock: check ${baseId} is not met yet` : 'APPROVE'}\n`);
+      if (!noverdict) say(`\nTASK_VERDICT: ${revise || split || descope ? `REVISE — mock: check ${baseId} is not met yet` : 'APPROVE'}\n`);
       if (bad) say('Task: T1 — do everything\n');
-      else if (process.env.COUNCIL_MOCK_NONEXT === '1') { /* approval with no next block: the task must stay open */ }
+      else if (nonext) { /* approval with no next block: the task must stay open */ }
+      else if (titleOnly) say(block(baseId, `mock task ${baseId} renamed`));
       else if (process.env.COUNCIL_MOCK_RESTATE_COMPLETED === '1' && cur) say(block(cur));
-      else if (split) say(block(`${cur || 'T1'}a`));
+      else if (split) say(splitToCompleted && completed ? block(completed) : block(`${cur || 'T1'}a`));
       else if (descope) say(`Task: ${baseId} — mock task ${baseId} (descoped)\nTask scope: mock/descoped-${baseId}.txt\nTask checks:\n- [ ] mock check ${baseId} descoped\n`);
       else if (revise) say(block(baseId));
+      else if (resume) say(`Task: ${deferred} — mock task ${deferred}\n`);
+      else if (noverdict) say(block(baseId));
       else if (taskMode !== 'hold' && round >= 3) say('Task: none\n');
       else say(block(next));
     }
