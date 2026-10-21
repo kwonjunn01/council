@@ -219,10 +219,11 @@ async function main() {
   assert.match(opening, /\[CITED: authors, year/);
   assert.match(opening, /Write to the other members in English/);
   const brief = promptOf(/claude-brief\.prompt/);
-  assert.match(brief, /Claim ledger/);
+  assert.match(brief, /Hypothesis ledger/);
+  assert.match(opening, /THOUGHT EXPERIMENTS/);
   assert.match(brief, /write all of it in Korean/);
   assert.match(sysText(s), /🔬 연구실/);
-  console.log('✓ research lab: personas, warrants, claim ledger, language split');
+  console.log('✓ research lab: personas, hypotheses and thought experiments, ledger, language split');
 
   // 3. concurrency: two folders at once; same folder twice is refused
   const a = tempRepo('a'), b = tempRepo('b');
