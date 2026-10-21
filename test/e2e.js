@@ -4,6 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const http = require('http');
 const { execFileSync, spawn } = require('child_process');
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'council-home-'));
@@ -12,6 +13,10 @@ fs.writeFileSync(path.join(HOME, 'test-config.json'), JSON.stringify({ networkRe
 Object.assign(process.env, { COUNCIL_HOME: HOME, COUNCIL_CONFIG: path.join(HOME, 'test-config.json'), COUNCIL_MOCK_STATE: MOCK_STATE, COUNCIL_MOCK_DELAY: '40' });
 
 const { createServer } = require('../server');
+const { Session, detectTestCmd, planTestCmd } = require('../lib/session');
+const { loadConfig } = require('../lib/config');
+const P = require('../lib/prompts');
+const UI = require('../public/app.js');
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const temps = [HOME, MOCK_STATE];
@@ -61,16 +66,72 @@ async function listen(server) {
 
 async function main() {
   const { server, council } = createServer({ mock: true });
-  const c = client(await listen(server));
+  const base = await listen(server);
+  const c = client(base);
   const three = ['claude', 'codex', 'gemini'];
 
   assert.strictEqual((await c.post('start', {}, {})).status, 403, 'POST without X-Council header must be rejected');
+
+  // 0. UI helpers, legacy sessions and the Host-header guard need no agents
+  assert.strictEqual(UI.inline('`a**b**c`'), '<code>a**b**c</code>', 'code spans must not be emphasised');
+  assert.match(UI.md('# t\n**bold** `x`'), /<b>bold<\/b>/);
+  assert.strictEqual(UI.outcomeLabel({ status: 'done' }), '결과 기록 없음', 'a legacy done must not claim a result');
+  assert.strictEqual(UI.outcomeLabel({ status: 'done', outcome: 'agreed' }), '합의됨');
+  assert.strictEqual(UI.outcomeLabel({ status: 'running' }), '진행 중');
+  assert.strictEqual(UI.outcomeLabel({ status: 'interrupted' }), '중단됨(앱 종료)', 'an app restart is a state, not a missing result');
+  // A reviewer that failed must count as a missing vote, never as agreement.
+  const voters = { r: { agents: ['claude', 'codex', 'gemini'] } };
+  assert.strictEqual(Session.prototype._consensus.call(voters, ['AGREE', 'AGREE', null]), false, 'a failed reviewer blocks consensus');
+  assert.strictEqual(Session.prototype._consensus.call(voters, ['AGREE', 'AGREE', 'SKIP']), true, 'a benched agent sits the round out');
+  const manyWords = P.renderContract({ contract: { ownerWords: ['THE MISSION', 'a', 'b', 'c', 'd', 'e', 'f', 'g'], assumptions: [], acceptance: [], openFindings: [] } });
+  assert.match(manyWords, /^> THE MISSION$/m, 'the mission must survive many interjections');
+  assert.match(manyWords, /earlier owner message/);
+  const legacyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'council-legacy-'));
+  temps.push(legacyRoot);
+  const legacyDir = path.join(legacyRoot, '.council', 'runs', 'legacy');
+  fs.mkdirSync(legacyDir, { recursive: true });
+  fs.writeFileSync(path.join(legacyDir, 'session.json'), JSON.stringify({
+    id: 'legacy', projectDir: legacyRoot, runDir: legacyDir, mode: 'debate', team: 'product', topic: 'old session',
+    agents: ['claude'], status: 'done', round: 2, startedAt: new Date().toISOString(),
+  }));
+  const legacy = Session.load(loadConfig({ mock: true }), legacyDir);
+  assert.strictEqual(legacy.verification(), 'unverified');
+  assert.deepStrictEqual(legacy.r.contract.ownerWords, ['old session'], 'legacy topics become the first owner words');
+  const pkgRepo = tempRepo('pkgdetect');
+  fs.writeFileSync(path.join(pkgRepo, 'package.json'), JSON.stringify({ scripts: { test: 'node --version' } }));
+  assert.strictEqual(detectTestCmd(pkgRepo), 'npm test');
+  fs.writeFileSync(path.join(pkgRepo, 'package.json'), JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }));
+  assert.strictEqual(detectTestCmd(pkgRepo), null, 'the npm placeholder is not a test command');
+  // Marker files for the other ecosystems in the detection table.
+  for (const [file, want] of [['pytest.ini', 'pytest'], ['pyproject.toml', 'pytest'], ['Cargo.toml', 'cargo test'], ['go.mod', 'go test ./...']]) {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'council-det-'));
+    temps.push(d);
+    fs.writeFileSync(path.join(d, file), '');
+    assert.strictEqual(detectTestCmd(d), want, `${file} should detect ${want}`);
+  }
+  assert.strictEqual(planTestCmd('## Test command\nRun `npm test` before merging.'), 'npm test', 'a command on the line after the heading is found');
+  assert.strictEqual(planTestCmd('Test command: `<the command>`'), null, 'a placeholder is not a command');
+  const badHost = await new Promise((resolve, reject) => {
+    const u = new URL(base);
+    const req = http.request({ host: u.hostname, port: u.port, path: '/api/config', headers: { Host: 'evil.example' } }, (res) => { res.resume(); resolve(res.statusCode); });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.strictEqual(badHost, 403, 'DNS-rebinding Host headers must be refused');
+  console.log('✓ UI helpers, legacy sessions, test detection, Host guard');
 
   // 1. develop happy path
   const dev = tempRepo('dev');
   let id = await c.start({ projectDir: dev, mode: 'develop', topic: 'build a todo CLI', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 8, planRounds: 2, testCmd: passFile });
   let s = await c.waitDone(id);
   assert.strictEqual(s.status, 'done', sysText(s));
+  // Outcome, review acceptance and test evidence are three separate facts (D8).
+  assert.strictEqual(s.outcome, 'agreed', sysText(s));
+  assert.strictEqual(s.accepted, true);
+  assert.strictEqual(s.verification, 'verified', JSON.stringify(s.lastTest));
+  assert.strictEqual(s.gate.ready, true);
+  assert.match(s.contract.goal, /mock goal/);
+  assert.ok(s.contract.acceptance.some((a) => /mock acceptance/.test(a.text)), JSON.stringify(s.contract));
   assert.match(s.branch, /^council\//);
   assert.strictEqual(git(dev, 'rev-parse', '--abbrev-ref', 'HEAD'), s.branch);
   assert.match(git(dev, 'log', '--format=%s', '-1'), /^council R\d+: Codex$/);
@@ -86,13 +147,28 @@ async function main() {
   for (const f of ['PLAN.md', 'FINAL.md', 'transcript.md', 'session.json', 'messages.jsonl']) assert.ok(fs.existsSync(path.join(s.runDir, f)), `missing ${f}`);
   console.log(`✓ develop: ${s.round} rounds, ${p.length} turns`);
 
-  // rollback to the first checkpoint
+  // rollback to the tested checkpoint, and evidence that follows the revision
   const cps = s.messages.filter((m) => m.sha);
   assert.ok(cps.length >= 1, 'checkpoints should carry their sha');
+  git(dev, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-qm', 'owner commit');
+  const moved = await c.state(id);
+  assert.strictEqual(moved.verification, 'stale', 'a later commit invalidates the old test evidence');
+  assert.strictEqual(moved.gate.ready, false, 'a stale result is never publish-ready');
+  assert.strictEqual(moved.outcome, 'agreed', 'the outcome records why the session ended, not the current tree');
   assert.strictEqual((await c.post('rollback', { runId: id, sha: cps[0].sha })).status, 200);
   assert.strictEqual(git(dev, 'rev-parse', 'HEAD'), cps[0].sha);
+  const restored = await c.state(id);
+  assert.strictEqual(restored.verification, 'verified', 'rolling back to the tested revision restores the evidence');
   assert.strictEqual((await c.post('rollback', { runId: id, sha: 'zzz' })).status, 400);
-  console.log('✓ rollback');
+  // Uncommitted tracked work is never torn down silently.
+  fs.appendFileSync(path.join(dev, 'README.md'), 'owner edit\n');
+  const headBeforeDirty = git(dev, 'rev-parse', 'HEAD');
+  const dirtyRefused = await c.post('rollback', { runId: id, sha: cps[0].sha });
+  assert.strictEqual(dirtyRefused.status, 400);
+  assert.match(dirtyRefused.json.error, /커밋 안 된 변경/);
+  assert.strictEqual(git(dev, 'rev-parse', 'HEAD'), headBeforeDirty);
+  assert.match(fs.readFileSync(path.join(dev, 'README.md'), 'utf8'), /owner edit/);
+  console.log('✓ rollback (stale evidence, dirty tree refused)');
 
   const pub = await c.post('publish', { runId: id });
   assert.strictEqual(pub.status, 400, 'publishing without a remote must fail cleanly');
@@ -284,6 +360,198 @@ async function main() {
   delete process.env.COUNCIL_MOCK_DENY;
   council.config.agents.claude.parser = 'text';
   console.log('✓ permission request → allowed for the session');
+
+  // 3d. results you can trust: outcome ≠ review acceptance ≠ test evidence; the publish gate follows all three
+  id = await c.start({ projectDir: tempRepo('roundlimit'), mode: 'debate', topic: 'no consensus', agents: ['claude', 'codex'], maxRounds: 1 });
+  s = await c.waitDone(id);
+  assert.strictEqual(s.outcome, 'round_limit', 'CONTINUE votes must not read as a result');
+  assert.strictEqual(s.gate.autoAllowed, true);
+  assert.strictEqual(s.gate.ready, false);
+  assert.strictEqual(s.verification, 'unverified');
+
+  process.env.COUNCIL_MOCK_FAIL = 'claude:auth:1:debate';
+  id = await c.start({ projectDir: tempRepo('noagents'), mode: 'debate', topic: 'solo dies', agents: ['claude'], maxRounds: 2 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_FAIL;
+  assert.strictEqual(s.outcome, 'no_agents', sysText(s));
+  assert.strictEqual(s.gate.autoAllowed, false, 'sessions with no agents are never auto-published');
+
+  process.env.COUNCIL_MOCK_FAIL = 'codex:auth:1:check,gemini:auth:1:check';
+  id = await c.start({ projectDir: tempRepo('errorstart'), mode: 'debate', topic: 'all down', agents: ['codex', 'gemini'], maxRounds: 2 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_FAIL;
+  assert.strictEqual(s.status, 'error');
+  assert.strictEqual(s.outcome, 'error');
+  assert.strictEqual(s.gate.autoAllowed, false);
+
+  // A failing test is evidence too: the session can end without agreement, and is never publish-ready.
+  id = await c.start({ projectDir: tempRepo('redtests'), mode: 'develop', topic: 'always red', agents: three, moderator: 'claude', worker: 'codex',
+    maxRounds: 2, planRounds: 1, testCmd: 'node -e "process.exit(1)"' });
+  s = await c.waitDone(id);
+  assert.strictEqual(s.outcome, 'round_limit', sysText(s));
+  assert.strictEqual(s.lastTest.ok, false);
+  assert.strictEqual(s.verification, 'failed');
+  assert.strictEqual(s.gate.ready, false);
+  assert.strictEqual(s.accepted, false);
+
+  // No test command: agreement is possible, proof is not.
+  process.env.COUNCIL_MOCK_NO_TESTCMD = '1';
+  id = await c.start({ projectDir: tempRepo('notest'), mode: 'develop', topic: 'no tests', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 8, planRounds: 1 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_NO_TESTCMD;
+  assert.strictEqual(s.testCmd, '');
+  assert.strictEqual(s.outcome, 'agreed');
+  assert.strictEqual(s.verification, 'unverified');
+  assert.strictEqual(s.gate.ready, false, 'agreement without evidence stays a draft');
+
+  // The plan may state the command on its own heading line.
+  process.env.COUNCIL_MOCK_TESTCMD_HEADING = '1';
+  id = await c.start({ projectDir: tempRepo('heading'), mode: 'develop', topic: 'heading test cmd', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 2, planRounds: 1 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_TESTCMD_HEADING;
+  assert.strictEqual(s.testCmd, 'node --version', sysText(s));
+  assert.ok(s.messages.some((m) => m.kind === 'test' && m.ok));
+
+  // Tests that edit tracked files cannot be evidence for the revision they supposedly tested.
+  id = await c.start({ projectDir: tempRepo('dirtytest'), mode: 'develop', topic: 'dirty test', agents: three, moderator: 'claude', worker: 'codex',
+    maxRounds: 8, planRounds: 1, testCmd: `node -e "require('fs').appendFileSync('README.md','x'); process.exit(0)"` });
+  s = await c.waitDone(id);
+  assert.strictEqual(s.lastTest.dirtyAfter, true);
+  assert.strictEqual(s.verification, 'stale', 'the tree moved while the tests ran');
+  console.log('✓ outcomes: round limit, no agents, error; failed/unverified/stale evidence');
+
+  // 3e. publish gate through a stub gh: only agreed + accepted + verified opens a ready PR
+  const stubHome = fs.mkdtempSync(path.join(os.tmpdir(), 'council-ghstub-'));
+  temps.push(stubHome);
+  const ghLog = path.join(stubHome, 'gh.log');
+  const ghStub = path.join(stubHome, 'gh-stub.js');
+  fs.writeFileSync(ghStub, [
+    "'use strict';",
+    "const fs = require('fs');",
+    'const args = process.argv.slice(2);',
+    'fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + "\\n");',
+    "const done = (s = '') => { if (s) process.stdout.write(s.endsWith('\\n') ? s : s + '\\n'); process.exit(0); };",
+    "if (args[0] === '--version') done('gh version 2.9.0 (stub)');",
+    "if (args[0] === 'auth') done();",
+    "if (args[0] === 'pr' && args[1] === 'list') done(process.env.GH_EXISTING || '');",
+    "if (args[0] === 'pr' && args[1] === 'create') done('https://github.com/example/repo/pull/7');",
+    "if (args[0] === 'pr' && args[1] === 'edit') done();",
+    "if (args[0] === 'pr' && args[1] === 'ready') done();",
+    "if (args[0] === 'issue' && args[1] === 'view') done(JSON.stringify({ number: 1, title: 'stub issue', body: 'stub body', url: 'https://github.com/example/repo/issues/1', labels: [], comments: [] }));",
+    "if (args[0] === 'issue' && args[1] === 'comment') done('https://github.com/example/repo/issues/1#issuecomment-1');",
+    'done();',
+  ].join('\n'));
+  const resetGh = () => fs.writeFileSync(ghLog, '');
+  const ghCalls = () => (fs.existsSync(ghLog) ? fs.readFileSync(ghLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  Object.assign(process.env, { COUNCIL_GH_STUB: ghStub, GH_LOG: ghLog });
+  resetGh();
+  const remoteHome = fs.mkdtempSync(path.join(os.tmpdir(), 'council-remote-'));
+  temps.push(remoteHome);
+  const pubRemote = path.join(remoteHome, 'origin.git');
+  git(remoteHome, 'clone', '-q', '--bare', tempRepo('pubseed'), pubRemote);
+
+  id = await c.start({ projectDir: tempRepo('pubready'), repo: pubRemote, mode: 'develop', topic: 'publish ready', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 8, planRounds: 1, testCmd: 'node --version' });
+  s = await c.waitDone(id);
+  assert.strictEqual(s.verification, 'verified', sysText(s));
+  resetGh();
+  let pubRes = await c.post('publish', { runId: id });
+  assert.strictEqual(pubRes.status, 200, JSON.stringify(pubRes.json));
+  assert.strictEqual(pubRes.json.ready, true);
+  let calls = ghCalls();
+  let create = calls.find((a) => a[0] === 'pr' && a[1] === 'create');
+  assert.ok(create, JSON.stringify(calls));
+  assert.ok(!create.includes('--draft'), 'agreed + accepted + verified must open a ready PR');
+
+  process.env.COUNCIL_MOCK_NO_TESTCMD = '1';
+  id = await c.start({ projectDir: tempRepo('pubdraft'), repo: pubRemote, mode: 'develop', topic: 'publish draft', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 8, planRounds: 1 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_NO_TESTCMD;
+  assert.strictEqual(s.verification, 'unverified');
+  resetGh();
+  pubRes = await c.post('publish', { runId: id });
+  assert.strictEqual(pubRes.status, 200, JSON.stringify(pubRes.json));
+  assert.strictEqual(pubRes.json.ready, false);
+  create = ghCalls().find((a) => a[0] === 'pr' && a[1] === 'create');
+  assert.ok(create && create.includes('--draft'), 'unverified work is published as a draft');
+
+  // Re-publishing an existing ready PR must demote it when the evidence no longer allows "ready".
+  process.env.GH_EXISTING = 'https://github.com/example/repo/pull/9';
+  resetGh();
+  pubRes = await c.post('publish', { runId: id });
+  delete process.env.GH_EXISTING;
+  assert.strictEqual(pubRes.status, 200, JSON.stringify(pubRes.json));
+  calls = ghCalls();
+  assert.ok(calls.some((a) => a[0] === 'pr' && a[1] === 'edit'), JSON.stringify(calls));
+  assert.ok(calls.some((a) => a[0] === 'pr' && a[1] === 'ready' && a.includes('--undo')), 'existing PR must be demoted to draft');
+
+  // A stopped session is never auto-published, even with the publish option on.
+  resetGh();
+  id = await c.start({ projectDir: tempRepo('pubstop'), repo: pubRemote, mode: 'develop', topic: 'stop publish', agents: ['claude', 'codex'], maxRounds: 0, planRounds: 1, publish: true });
+  await sleep(200);
+  await c.post('stop', { runId: id, hard: true });
+  s = await c.waitDone(id, 15000);
+  assert.strictEqual(s.outcome, 'stopped', sysText(s));
+  assert.strictEqual(s.published, null);
+  assert.ok(!ghCalls().some((a) => a[0] === 'pr' && a[1] === 'create'), 'stopped work must not be pushed as a PR');
+
+  // A debate that did not agree must not auto-comment on its issue.
+  resetGh();
+  id = await c.start({ projectDir: tempRepo('pubdebate'), mode: 'debate', topic: 'issue drill', agents: ['claude', 'codex'], maxRounds: 1, issue: '#1', publish: true });
+  s = await c.waitDone(id);
+  assert.strictEqual(s.outcome, 'round_limit');
+  assert.ok(!ghCalls().some((a) => a[0] === 'issue' && a[1] === 'comment'), 'only an agreed debate is auto-published');
+  delete process.env.COUNCIL_GH_STUB; delete process.env.GH_LOG;
+  console.log('✓ publish gate: ready vs draft, demote existing PR, no auto-publish when stopped or not agreed');
+
+  // 3f. the working contract, independent parallel reviews, lenses and findings that carry over
+  const trustPromptOf = (st, re) => {
+    const f = fs.readdirSync(path.join(st.runDir, 'turns')).find((x) => re.test(x));
+    assert.ok(f, `missing prompt ${re}`);
+    return fs.readFileSync(path.join(st.runDir, 'turns', f), 'utf8');
+  };
+  process.env.COUNCIL_MOCK_FINDING = 'missing edge case X';
+  id = await c.start({ projectDir: tempRepo('findings'), mode: 'develop', topic: 'carry findings', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 8, planRounds: 1, testCmd: 'node --version' });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_FINDING;
+  assert.strictEqual(s.outcome, 'agreed', sysText(s));
+  assert.match(s.contract.goal, /mock goal/);
+  assert.deepStrictEqual(s.contract.openFindings, [], 'a FIXED finding must leave the ledger');
+  const codexFirst = trustPromptOf(s, /-R2-codex-review\.prompt\.md$/);
+  const geminiFirst = trustPromptOf(s, /-R2-gemini-review\.prompt\.md$/);
+  const carried = trustPromptOf(s, /-R3-codex-review\.prompt\.md$/);
+  assert.match(codexFirst, /CRAFT lens/, 'Codex reviews with its craft lens');
+  assert.match(geminiFirst, /USEFULNESS and DESIGN lens/, 'Gemini reviews with its usefulness lens');
+  assert.match(codexFirst, /## Contract/, 'reviewers see the contract');
+  assert.match(codexFirst, /## Latest test run \(`node --version`\) @ [0-9a-f]{7,}/, 'reviewers get the tested revision, not a bare PASS');
+  assert.ok(!geminiFirst.includes('**[codex]** review'), 'parallel reviewers must not see each other');
+  assert.match(carried, /Unresolved findings carried into this round[\s\S]*missing edge case X/, 'a MAJOR finding must reach the next round');
+  assert.match(trustPromptOf(s, /-implement\.prompt\.md$/), /## Contract/, 'the worker sees the contract');
+  assert.ok(s.messages.some((m) => m.phase === 'review' && m.findings?.some((f) => f.level === 'MAJOR')), 'findings are stored on the message');
+  console.log('✓ contract in prompts, independent reviews, lenses, findings carry-over and FIXED');
+
+  // A malformed contract block keeps the previous one instead of wiping it.
+  process.env.COUNCIL_MOCK_CONTRACT = '0';
+  id = await c.start({ projectDir: tempRepo('badcontract'), mode: 'debate', topic: 'malformed contract', agents: ['claude', 'codex'], maxRounds: 1 });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_CONTRACT;
+  assert.strictEqual(s.contract.goal, '');
+  assert.deepStrictEqual(s.contract.acceptance, []);
+  assert.ok(s.contract.ownerWords.includes('malformed contract'));
+
+  // The owner's words are added verbatim and void earlier acceptance until the next synthesis.
+  id = await c.start({ projectDir: tempRepo('injectowner'), mode: 'debate', topic: 'owner words drill', agents: ['claude', 'codex'], maxRounds: 0 });
+  await c.post('pause', { runId: id });
+  for (let i = 0; i < 100 && (await c.state(id)).status !== 'paused'; i++) await sleep(50);
+  assert.strictEqual((await c.state(id)).status, 'paused');
+  const ownerText = '새 요구: JSON 파일로 저장';
+  assert.strictEqual((await c.post('inject', { runId: id, text: ownerText })).status, 200);
+  s = await c.state(id);
+  assert.strictEqual(s.accepted, false, 'owner words invalidate earlier acceptance');
+  assert.strictEqual(s.contract.needsRevision, true);
+  assert.ok(s.contract.ownerWords.includes(ownerText), 'owner words are quoted verbatim, not paraphrased');
+  await c.post('stop', { runId: id, hard: true });
+  await c.waitDone(id, 10000);
+  console.log('✓ contract: malformed keeps previous, owner injection invalidates acceptance');
 
   // 4. failure drills: Gemini hits a usage limit, Codex has a network blip while implementing
   // maxRounds is generous: rounds keep going without consensus until Gemini's cooldown ends, however fast the machine.

@@ -100,8 +100,9 @@
       <header id="topbar">
         <div class="titlebar">
           <span id="statusDot"></span>
-          <div id="runTitle"></div>
+          <div id="runTitle" title="클릭하면 미션 전문을 봅니다"></div>
           <div class="controls">
+            <button id="cloneBtn" title="같은 화두와 설정으로 새 세션">📋 복제</button>
             <button id="pauseBtn">⏸ 일시정지</button>
             <button id="finishBtn" title="현재 턴이 끝나면 최종 보고서를 쓰고 종료">🏁 마무리</button>
             <button id="killBtn" class="danger" title="실행 중인 에이전트를 즉시 종료">⛔ 중단</button>
@@ -117,9 +118,12 @@
       <div id="runBody">
         <div id="runMain">
           <div id="scroller">
+            <div id="contract" hidden><details open><summary>📜 작업 계약 <small>내 말은 그대로, 나머지는 모델의 해석</small></summary><div id="contractBody"></div></details></div>
             <div id="plan" hidden><details><summary>📋 합의된 계획 (PLAN.md)</summary><div class="md" id="planBody"></div></details></div>
             <div id="feed"></div>
             <div id="live"></div>
+            <!-- the result sits last so the feed's stick-to-bottom leaves it in view when a session ends -->
+            <div id="result" hidden></div>
           </div>
           <div id="replyBar" hidden><span id="replyText"></span><button type="button" id="replyCancel" class="icon-btn">✕</button></div>
           <form id="composer">

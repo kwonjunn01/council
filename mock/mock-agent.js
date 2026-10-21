@@ -54,7 +54,21 @@ process.stdin.on('data', (d) => { input += d; }).on('end', async () => {
   }
   for (const l of lines) { say(l + '\n'); await sleep(Number(process.env.COUNCIL_MOCK_DELAY || 120)); }
   if (phase === 'work-order' && process.env.COUNCIL_MOCK_ASSIGN && round === Number(process.env.COUNCIL_MOCK_ASSIGN_ROUND || 0)) say(`\nASSIGN: ${process.env.COUNCIL_MOCK_ASSIGN} — 디자인 품질이 기준 미달\n`);
-  if (phase === 'plan-final') say('\nTest command: `node --version`\n');
+  // The chosen test-command format is configurable so the e2e can drill both the heading line and auto-detection.
+  if (phase === 'plan-final' && process.env.COUNCIL_MOCK_NO_TESTCMD !== '1') {
+    say(process.env.COUNCIL_MOCK_TESTCMD_HEADING === '1' ? '\n## Test command\n`node --version`\n' : '\nTest command: `node --version`\n');
+  }
+  // Every moderator synthesis carries the contract block; COUNCIL_MOCK_CONTRACT=0 emits a malformed one instead.
+  if (['brief', 'plan-brief', 'plan-final', 'work-order'].includes(phase)) {
+    if (process.env.COUNCIL_MOCK_CONTRACT === '0') say('\n## Contract\n(this block is malformed on purpose)\n');
+    else say(`\n## Contract\nGoal: ${process.env.COUNCIL_MOCK_GOAL || 'mock goal: ship the requested change'}\nAssumptions:\n- mock assumption\nAcceptance:\n- [ ] mock acceptance: the change works\n`);
+  }
+  // Findings carry-over drill: report once, then FIXED when the next round's prompt carries it.
+  if (phase === 'review' && process.env.COUNCIL_MOCK_FINDING) {
+    const finding = process.env.COUNCIL_MOCK_FINDING;
+    if (input.includes('Unresolved findings carried into this round') && input.includes(finding)) say(`\nFIXED: ${finding}\n`);
+    else say(`\nFINDING: [MAJOR] ${finding}\n`);
+  }
   if (phase === 'brief' && round === 1 && process.env.COUNCIL_MOCK_ASK !== '0') say('\nASK OWNER: 데이터는 로컬 파일과 DB 중 어디에 저장할까요?\n');
   if (phase === 'brief' && /^Mode: auto$/m.test(input)) say(`NEXT: ${process.env.COUNCIL_MOCK_NEXT || 'BUILD'}\n`);
   if (!['final', 'plan-final', 'summary'].includes(phase)) say(`\nVOTE: ${round >= 3 ? 'AGREE' : 'CONTINUE'}\n`);

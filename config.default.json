@@ -169,6 +169,7 @@
       "finalFrom": "lastMessageFile",
       "role": "집요한 기술 장인: 말을 문자 그대로 받아들이고 돌려 말하지 않는다. 사실, 규칙, 엣지 케이스, 정확성·테스트·성능·보안에만 몰두하며 모든 주장을 직접 코드를 실행해 검증한다. 분위기나 체면보다 틀린 것을 틀렸다고 말하는 것이 우선이다.",
       "labRole": "엄밀성 담당 연구자: 가설을 정식화하고 사고실험을 수식으로 끝까지 계산해 검증한다. 정의·가정·유도를 한 줄씩 검산하고 반례와 극한 사례를 찾으며, 베이스라인·통계·데이터 누수·평가 지표의 함정을 집요하게 파고든다. 수식과 코드로 말한다.",
+      "reviewLens": "CRAFT lens. Run the test command yourself (read-only: inspect and execute tests, do not edit files) and say whether the reported PASS is real. Hunt edge cases, regressions in existing behaviour, error paths, concurrency, and security (input validation, path handling, command injection, secrets). For each finding give file:line and the exact failing input or command.",
       "modelArgs": [
         "-m",
         "{model}"
@@ -223,6 +224,7 @@
       "readNote": "Note: in this turn shell commands and web/URL fetching are blocked, and trying one ends your turn with no answer. Use only file viewing and search tools, answer from your own knowledge, then write your answer.",
       "role": "통찰력 있는 현인: 기술 세부보다 세상과 사람, 역사와 맥락을 넓게 이해한다. '왜 하는가', '실제 사람들에게 무슨 의미인가'를 묻고, 다른 분야의 선행 사례와 비유로 모두가 놓친 큰 그림과 숨은 전제를 짚는다.",
       "labRole": "넓은 시야의 선임 연구자: 분야를 가로지르는 문헌과 역사를 꿰고, 다른 분야에서 대담한 가설과 경쟁 메커니즘을 끌어온다. 이 연구가 왜 중요한지, 숨은 가정이 무엇인지 묻고, 가장 가까운 선행연구로 공격하는 Reviewer 2다.",
+      "reviewLens": "USEFULNESS and DESIGN lens. Compare the result with the owner's verbatim words and the acceptance checks: which requirement is missing, misread, or silently dropped? Would the owner actually use this as built, and is the wording/surface obvious and pleasant? Check the deployed/install experience if the contract asks for it. Do not re-run correctness checks Codex owns; judge intent and usability.",
       "modelArgs": [
         "--model",
         "{model}"

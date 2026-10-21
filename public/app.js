@@ -6,6 +6,9 @@ const PHASE = {
   implement: '구현', review: '리뷰', 'work-order': '작업 지시', final: '최종 보고', test: '테스트', summary: '요약', check: '점검',
 };
 const STATUS = { created: '준비', running: '진행 중', paused: '일시정지', done: '완료', stopped: '중단됨', error: '오류', interrupted: '중단됨(앱 종료)' };
+// Why the session ended is not the same question as `status`; a legacy `done` must not read as a result.
+const OUTCOME = { agreed: '합의됨', round_limit: '라운드 한도', stopped: '중단됨', no_agents: '에이전트 없음', error: '오류' };
+const VERIFY = { verified: '검증됨', failed: '검증 실패', unverified: '미검증', stale: '이전 커밋 결과' };
 const DEFAULT_ROLES = { moderator: 'claude', worker: 'deepseek' };
 const TEAM_HINT = {
   product: '🛠 기술·쓸모·디자인·매력을 따지는 제품 전문가 팀입니다.',
@@ -49,9 +52,13 @@ function ago(t) {
 function load(k) { try { return JSON.parse(localStorage.getItem('council.' + k)); } catch { return null; } }
 function save(k, v) { try { localStorage.setItem('council.' + k, JSON.stringify(v)); } catch {} }
 
+// Code spans are cut out first: applying bold/links inside them corrupts `a**b**c`.
 function inline(s) {
-  return s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+  const codes = [];
+  let out = String(s).replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+  out = out.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noreferrer">$2</a>');
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`);
 }
 function md(src) {
   const parts = String(src || '').split(/^```/m);
@@ -85,6 +92,13 @@ function md(src) {
 const agentLabel = (id) => (id === 'tests' ? '테스트' : CFG.agents[id]?.label || id);
 const agentColor = (id) => (id === 'tests' ? 'var(--muted)' : CFG.agents[id]?.color || 'var(--muted)');
 const isActive = (r) => r && ['running', 'paused', 'created'].includes(r.status);
+// Active sessions show their status; finished ones show the outcome, or "no result recorded" for v0.5.x files.
+function outcomeLabel(s) {
+  if (isActive(s)) return STATUS[s.status] || s.status;
+  // An app restart is a state, not a result: offer "continue" rather than pretending nothing was recorded.
+  if (s.status === 'interrupted' && !s.outcome) return STATUS.interrupted;
+  return OUTCOME[s.outcome] || '결과 기록 없음';
+}
 
 function roleOf(id, r = RUN) {
   if (!r) return '';
@@ -123,7 +137,7 @@ function renderSessions() {
     const dot = s.waitingUntil ? 'waiting' : s.status;
     return `<button class="sitem ${s.id === SEL ? 'sel' : ''}" data-id="${esc(s.id)}" title="${esc(s.projectDir)}">
       <div class="t"><span class="dot ${dot}"></span><span>${esc(s.topic || '(제목 없음)')}</span></div>
-      <div class="s">${s.team === 'lab' ? '🔬 ' : ''}${esc(base(s.projectDir))} · ${MODE_LABEL[s.mode] || s.mode} · R${s.round || 0} · ${esc(STATUS[s.status] || s.status)} · ${ago(s.updatedAt || s.startedAt)}</div></button>`;
+      <div class="s">${s.team === 'lab' ? '🔬 ' : ''}${esc(base(s.projectDir))} · ${MODE_LABEL[s.mode] || s.mode} · R${s.round || 0} · <span class="obadge ${esc(s.outcome || (isActive(s) ? 'active' : 'none'))}">${esc(outcomeLabel(s))}</span> · ${ago(s.updatedAt || s.startedAt)}</div></button>`;
   };
   box.innerHTML = (act.length ? `<div class="sgroup">실행 중 ${act.length}</div>${act.map(item).join('')}` : '')
     + (rest.length ? `<div class="sgroup">기록</div>${rest.map(item).join('')}` : '')
@@ -330,6 +344,38 @@ function restoreForm() {
   setMode(load('mode') || 'auto');
 }
 
+// Re-open the form with everything that made this session, so a loose brief can be re-run with one click.
+function cloneRun() {
+  const r = RUN;
+  if (!r) return;
+  TEAM = r.team === 'lab' ? 'lab' : 'product';
+  const mode = ['auto', 'debate', 'develop'].includes(r.mode) ? r.mode : 'auto';
+  save('team', TEAM);
+  const lineup = r.initialAgents || r.agents || [];
+  const agents = load('agents.' + mode) || {};
+  for (const id of Object.keys(CFG.agents)) agents[id] = { ...(agents[id] || {}), on: lineup.includes(id) };
+  for (const id of lineup) agents[id] = { ...(agents[id] || {}), on: true, model: r.models?.[id] ?? '', effort: r.efforts?.[id] ?? '' };
+  save('agents.' + mode, agents);
+  const roles = load('roles.' + TEAM) || {};
+  for (const id of lineup) if (r.roles?.[id]) roles[id] = r.roles[id];
+  save('roles.' + TEAM, roles);
+  save('moderator.' + mode, r.moderator || 'none');
+  if (mode === 'develop') save('worker.develop', r.workerMode === 'rotate' ? 'rotate' : (r.worker || 'rotate'));
+  const fields = { projectDir: r.projectDir || '', maxRounds: r.maxRounds ?? '', planRounds: r.planRounds ?? 3,
+    language: r.language || 'Korean', discussionLanguage: r.discussionLanguage || 'English', testCmd: r.testCmd || '', topic: r.topic || '' };
+  for (const [k, v] of Object.entries(fields)) { $('#' + k).value = v; save(k, v); }
+  const checks = { relentless: !!r.relentless, blindOpening: r.blindOpening !== false, branch: r.useBranch !== false, publish: !!r.publish };
+  for (const [k, v] of Object.entries(checks)) { $('#' + k).checked = v; save(k, v); }
+  // A cloned issue would be fetched again and its fresh comments would change the mission.
+  $('#issue').value = ''; $('#repo').value = '';
+  $('#issuePreview').textContent = ''; $('#repoStatus').textContent = ''; $('#err').textContent = '';
+  document.querySelectorAll('#teamSeg button').forEach((b) => b.classList.toggle('on', b.dataset.team === TEAM));
+  setMode(mode);
+  showNew();
+  checkGithub();
+  $('#topic').focus();
+}
+
 async function start(e) {
   e.preventDefault();
   $('#err').textContent = '';
@@ -348,7 +394,7 @@ async function start(e) {
       testCmd: $('#testCmd').value, relentless: $('#relentless').checked, blindOpening: $('#blindOpening').checked,
       issue: $('#issue').value, branch: $('#branch').checked, publish: $('#publish').checked,
     });
-    $('#topic').value = '';
+    // The mission stays in the form: a loose brief is expensive to retype and is the source of the contract.
     $('#issue').value = '';
     saveForm();
     refreshSessions();
@@ -465,7 +511,12 @@ function msgEl(m) {
   }
   if (m.kind === 'system') {
     el.className = 'msg system';
-    el.textContent = m.text;
+    if (m.sha) {
+      // A checkpoint carries its stat and a capped patch, so the result can be judged without opening git.
+      el.innerHTML = `<details class="checkpoint"><summary>${esc(m.text)}</summary>
+        ${m.stat ? `<pre class="cstat">${esc(m.stat)}</pre>` : ''}
+        ${m.patch ? `<pre class="cpatch">${esc(m.patch)}</pre>` : ''}</details>`;
+    } else el.textContent = m.text;
     if (m.sha && !isActive(RUN) && RUN?.git) {
       const b = document.createElement('button');
       b.textContent = '⏪ 이 시점으로 되돌리기';
@@ -478,20 +529,30 @@ function msgEl(m) {
     return el;
   }
   const cls = m.kind === 'test' ? `test ${m.ok ? 'pass' : 'fail'}` : m.kind;
-  el.className = `msg ${cls}${m.kind === 'agent' && m.ok === false ? ' failed' : ''}`;
+  const isModerator = m.kind === 'agent' && m.agent === RUN?.moderator && ['brief', 'plan-brief', 'plan-final', 'work-order', 'final'].includes(m.phase);
+  el.className = `msg ${cls}${m.kind === 'agent' && m.ok === false ? ' failed' : ''}${isModerator ? ' moderator' : ''}${m.phase === 'review' ? ' review' : ''}`;
   const who = m.kind === 'user' ? '🧑 나 (중재자)' : m.kind === 'test' ? '🧪 테스트' : agentLabel(m.agent);
   if (m.kind === 'agent') el.style.setProperty('--c', agentColor(m.agent));
   const role = m.kind === 'agent' ? roleOf(m.agent) : '';
+  const findings = m.findings || [];
+  const count = (level) => findings.filter((f) => f.level === level).length;
+  const findingBadges = m.phase === 'review'
+    ? [['BLOCKER', count('BLOCKER')], ['MAJOR', count('MAJOR')], ['MINOR', count('MINOR')]]
+      .filter(([, n]) => n).map(([level, n]) => `<span class="tag find ${level.toLowerCase()}">${level} ${n}</span>`).join('')
+    : '';
   el.innerHTML = `<div class="mh"><span class="who">${esc(who)}</span>
       ${role ? `<span class="tag role">${esc(role)}</span>` : ''}
       <span class="tag">R${m.round}${m.phase ? ' · ' + esc(PHASE[m.phase] || m.phase) : ''}</span>
       ${m.vote ? `<span class="vote ${m.vote}">${m.vote === 'AGREE' ? '동의' : '계속'}</span>` : ''}
+      ${findingBadges}
       ${m.model ? `<span>${esc(m.model)}</span>` : ''}
       ${m.durationMs ? `<span>${Math.round(m.durationMs / 1000)}s</span>` : ''}
       ${m.costUsd ? `<span>$${m.costUsd.toFixed(3)}</span>` : ''}
       <span style="margin-left:auto">${hhmm(m.ts)}</span></div>
     <div class="md">${md(m.kind === 'agent' ? stripControl(m.text) : m.text)}</div>`;
-  if ((m.text || '').length > 1800) {
+  // The moderator's synthesis stays expanded and stands out; individual reviews fold to their verdict.
+  const collapsible = !isModerator && ((m.text || '').length > 1800 || m.phase === 'review');
+  if (collapsible) {
     el.classList.add('collapsed');
     const b = document.createElement('button');
     b.className = 'more'; b.textContent = '펼치기 ▾';
@@ -648,15 +709,18 @@ function liveSync() {
   for (const [k, el] of live) if (!keys.has(k)) { el.remove(); live.delete(k); }
   for (const a of RUN?.active || []) if (!live.has(a.key)) liveStart({ ...a, round: RUN.round });
 }
-setInterval(() => document.querySelectorAll('.elapsed').forEach((e) => { e.textContent = Math.round((Date.now() - e.dataset.t) / 1000) + 's'; }), 1000);
-
 function renderRun() {
   const r = RUN;
   if (!r) return;
   const active = isActive(r);
   $('#statusDot').className = r.status;
-  $('#runTitle').textContent = r.topic.split('\n')[0];
-  $('#runTitle').title = r.topic;
+  // The first line keeps the title bar compact; clicking it reveals the whole mission.
+  const firstLine = r.topic.split('\n')[0];
+  const titleEl = $('#runTitle');
+  titleEl.innerHTML = `<span class="t1">${esc(firstLine)}</span><span class="tfull">${esc(r.topic)}</span>`;
+  titleEl.title = r.topic;
+  titleEl.classList.toggle('has-more', r.topic.trim() !== firstLine.trim() || firstLine.length > 80);
+  if (titleEl.classList.contains('expanded') && r.topic.trim() === firstLine.trim()) titleEl.classList.remove('expanded');
   $('#pauseBtn').hidden = !active;
   $('#pauseBtn').textContent = r.paused || r.status === 'paused' ? '▶ 재개' : '⏸ 일시정지';
   $('#finishBtn').hidden = !active;
@@ -666,7 +730,9 @@ function renderRun() {
   const canPublish = !active && (r.mode === 'develop' ? !!r.branch : !!r.issue);
   $('#publishBtn').hidden = !canPublish;
   $('#publishBtn').disabled = !!r.publishing;
-  $('#publishBtn').textContent = r.publishing ? '🐙 게시 중…' : r.published ? '🐙 다시 게시' : (r.mode === 'develop' ? '🐙 push + PR' : '🐙 이슈에 게시');
+  // The label states what the gate allows, so the owner never has to guess what a click will open.
+  const pubLabel = r.mode === 'develop' ? (r.gate?.ready ? '🐙 정식 PR 게시' : '🐙 초안 PR 게시') : '🐙 이슈에 게시';
+  $('#publishBtn').textContent = r.publishing ? '🐙 게시 중…' : r.published ? `🐙 ${pubLabel.replace('🐙 ', '다시 ')}` : pubLabel;
 
   const stage = r.stage === 'plan' ? '계획 단계' : r.stage === 'build' ? '빌드 단계' : (r.mode === 'auto' ? '토론 단계 (자동)' : '토론');
   const cost = Object.values(r.cost || {}).reduce((a, b) => a + b, 0);
@@ -676,7 +742,7 @@ function renderRun() {
   };
   $('#runMeta').innerHTML = [
     `<span>${TEAM_LABEL[r.team] || TEAM_LABEL.product}</span>`,
-    `<span>${STATUS[r.status] || r.status} · R${r.round}${r.maxRounds ? '/' + r.maxRounds : ' (무제한)'} · ${r.mode === 'develop' ? '🛠' : '💬'} ${stage}</span>`,
+    `<span>${esc(outcomeLabel(r))} · R${r.round}${r.maxRounds ? '/' + r.maxRounds : ' (무제한)'} · ${r.mode === 'develop' ? '🛠' : '💬'} ${stage}</span>`,
     `<span title="${esc(r.projectDir)}">📁 ${esc(base(r.projectDir))}</span>`,
     r.branch ? `<span>🌿 ${esc(r.branch)} ← ${esc(r.baseBranch)}</span>` : '',
     r.issue ? `<span>🐙 <a href="${esc(r.issue.url)}" target="_blank">#${r.issue.number}</a></span>` : '',
@@ -693,9 +759,76 @@ function renderRun() {
   for (const [a, why] of Object.entries(r.benched || {})) notes.push(`<span class="bad">🚫 ${esc(agentLabel(a))}: ${esc(why)}</span>`);
   $('#statusLine').innerHTML = notes.join(' · ');
   renderRequests();
+  renderContract();
+  renderResult();
   $('#plan').hidden = !r.plan;
   if (r.plan && $('#planBody').dataset.src !== r.plan) { $('#planBody').innerHTML = md(r.plan); $('#planBody').dataset.src = r.plan; }
   liveSync();
+}
+
+// The contract separates what the owner actually said (verbatim quotes) from what the models inferred.
+function renderContract() {
+  const r = RUN, box = $('#contract');
+  if (!r) { box.hidden = true; return; }
+  const c = r.contract || {};
+  const words = (c.ownerWords || []).filter(Boolean);
+  const acceptance = (c.acceptance || []).map((a) => (typeof a === 'string' ? { done: false, text: a } : a));
+  const has = words.length || c.goal || acceptance.length || (c.assumptions || []).length || (c.openFindings || []).length;
+  box.hidden = !has;
+  if (!has) return;
+  const key = JSON.stringify(c);
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  const clip = (s) => { s = String(s); return s.length > 2000 ? s.slice(0, 2000) + '…' : s; };
+  // Only the last few messages: older ones are already folded into goal/acceptance.
+  const quotes = words.slice(-6).map((w) => `<blockquote>${esc(clip(w))}</blockquote>`).join('');
+  $('#contractBody').innerHTML = `
+    ${quotes ? `<div class="cquote"><div class="clabel">내가 한 말 — 그대로</div>${quotes}</div>` : ''}
+    ${c.goal ? `<div class="cline"><b>목표</b> ${esc(c.goal)}</div>` : ''}
+    ${(c.assumptions || []).length ? `<div class="cline"><b class="assume">가정 — 모델의 해석</b><ul class="assume">${c.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
+    ${acceptance.length ? `<div class="cline"><b>수용 기준</b><ul class="accept">${acceptance.map((a) => `<li class="${a.done ? 'done' : ''}">${a.done ? '☑' : '☐'} ${esc(a.text)}</li>`).join('')}</ul></div>` : ''}
+    ${(c.openFindings || []).length ? `<div class="cline"><b>열린 지적 ${c.openFindings.length}</b><ul class="ofind">${c.openFindings.map((f) => `<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
+    ${c.needsRevision ? '<div class="crev">⚠ 새로 남긴 말이 아직 계약에 반영되지 않았습니다 — 다음 정리에서 갱신됩니다.</div>' : ''}`;
+}
+
+// One card answers what the owner cares about: did it end well, was it proven, what is left.
+function renderResult() {
+  const r = RUN, box = $('#result');
+  if (!r) { box.hidden = true; return; }
+  box.hidden = false;
+  const active = isActive(r);
+  const outcome = active ? (STATUS[r.status] || r.status) : (r.outcome ? OUTCOME[r.outcome] : '결과 기록 없음');
+  const okey = active ? 'active' : (r.outcome || 'none');
+  const v = r.verification || 'unverified';
+  const t = r.lastTest;
+  const verifyDetail = t
+    ? `\`${t.cmd || r.testCmd}\` @ ${String(t.sha || '?').slice(0, 8)} · R${t.round} · ${t.ok ? 'PASS' : `FAIL (exit ${t.code})`}${t.dirtyAfter ? ' · 테스트가 파일을 바꿈' : ''}`
+    : r.testCmd ? `\`${r.testCmd}\` — 아직 실행하지 않음`
+      : r.mode === 'debate' ? '토론 세션 — 테스트 없음' : '테스트 명령 없음';
+  const ready = r.gate ? !!r.gate.ready : (r.outcome === 'agreed' && r.accepted === true && v === 'verified');
+  const open = r.contract?.openFindings || [];
+  const files = (r.changedFiles || []);
+  const shown = files.slice(0, 12);
+  const canPublish = !active && (r.mode === 'develop' ? !!r.branch : !!r.issue);
+  // A debate publishes a comment, not a PR: "draft" would be meaningless there.
+  const gateText = r.mode === 'debate'
+    ? (r.outcome === 'agreed' ? '합의됨 — 이슈에 바로 게시 가능' : '합의되지 않음 — 수동 게시만 가능')
+    : (ready ? '합의 · 승인 · 검증 — 그대로 게시 가능' : '초안(draft)으로만 게시');
+  box.innerHTML = `<div class="rhead">
+      <span class="obadge ${okey}">${esc(outcome)}</span>
+      ${!active && r.mode !== 'debate' ? `<span class="vbadge ${v}">${esc(VERIFY[v] || v)}</span>` : ''}
+      ${active ? '' : `<span class="gate ${ready ? 'ready' : ''}">${esc(gateText)}</span>`}
+      ${r.published ? `<a href="${esc(r.published)}" target="_blank" rel="noreferrer">게시됨</a>` : ''}
+    </div>
+    <div class="rbody">
+      <div><b>검증</b> <span class="muted">${inline(esc(verifyDetail))}</span></div>
+      ${!active && r.mode !== 'debate' && r.accepted !== null && r.accepted !== undefined ? `<div><b>리뷰 승인</b> <span class="${r.accepted ? 'ok' : 'bad'}">${r.accepted ? '예' : '아니오'}</span></div>` : ''}
+      ${files.length ? `<div><b>바뀐 파일 ${files.length}</b> <span class="files">${shown.map((f) => `<code>${esc(f)}</code>`).join(' ')}${files.length > shown.length ? ` <span class="muted">…+${files.length - shown.length}</span>` : ''}</span></div>` : ''}
+      ${open.length ? `<div><b>남은 지적 ${open.length}</b><ul class="ofind">${open.map((f) => `<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
+    </div>
+    ${canPublish ? `<div class="racts"><button type="button" id="resultPublish" class="${ready ? 'primary' : ''}">${r.mode === 'debate' ? '🐙 이슈에 코멘트' : ready ? '🐙 정식 PR 게시' : '🐙 초안 PR 게시'}</button></div>` : ''}`;
+  const b = $('#resultPublish');
+  if (b) b.onclick = () => api('publish', { runId: SEL }).catch((e) => toast('error', e.message));
 }
 
 function startReply(m) {
@@ -816,6 +949,8 @@ async function init() {
   $('#probeBtn').onclick = probe;
   $('#setup').addEventListener('submit', start);
   $('#newBtn').onclick = showNew;
+  $('#cloneBtn').onclick = cloneRun;
+  $('#runTitle').onclick = () => { const t = $('#runTitle'); if (t.classList.contains('has-more')) t.classList.toggle('expanded'); };
   $('#workBtn').onclick = () => setWorkOpen(!$('#runView').classList.contains('work-open'));
   $('#workClose').onclick = () => setWorkOpen(false);
   setWorkOpen(load('workOpen') ?? window.innerWidth > 1100);
@@ -844,9 +979,12 @@ async function init() {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); }
   });
   setInterval(renderSessions, 60000);
+  setInterval(() => document.querySelectorAll('.elapsed').forEach((e) => { e.textContent = Math.round((Date.now() - e.dataset.t) / 1000) + 's'; }), 1000);
 
   const last = load('sel');
   if (last) select(last); else showNew();
   connect();
 }
-init().catch((e) => { document.body.innerHTML = `<pre style="padding:20px">${esc(e.stack || e.message)}</pre>`; });
+// The e2e loads this file in Node to test pure helpers; a browser runs the app.
+if (typeof module !== 'undefined' && module.exports) module.exports = { inline, md, outcomeLabel };
+else init().catch((e) => { document.body.innerHTML = `<pre style="padding:20px">${esc(e.stack || e.message)}</pre>`; });
