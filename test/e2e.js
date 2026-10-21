@@ -123,6 +123,19 @@ async function main() {
   const legacy3 = Session.load(loadConfig({ mock: true }), legacy3Dir);
   assert.strictEqual(legacy3.r.testCmd, 'npm test', 'a bad saved command falls back to detected tests');
   fs.unlinkSync(path.join(legacyRoot, 'package.json'));
+  // A saved task that lost its scope or checks never grants a write turn: it goes back to the moderator first.
+  const legacy4Dir = path.join(legacyRoot, '.council', 'runs', 'legacy4');
+  fs.mkdirSync(legacy4Dir, { recursive: true });
+  fs.writeFileSync(path.join(legacy4Dir, 'session.json'), JSON.stringify({
+    id: 'legacy4', projectDir: legacyRoot, runDir: legacy4Dir, mode: 'develop', team: 'product', topic: 'saved task',
+    agents: ['claude'], status: 'interrupted', round: 3, startedAt: new Date().toISOString(),
+    contract: { taskGate: 'active', currentTask: { id: 'T1', title: 'x' }, completedTasks: [], deferredTasks: [] },
+  }));
+  const legacy4 = Session.load(loadConfig({ mock: true }), legacy4Dir);
+  assert.strictEqual(legacy4._taskGate(), 'awaiting', 'an incomplete saved task never grants a write turn');
+  assert.strictEqual(legacy4.r.contract.currentTask.id, 'T1', 'the saved task stays on record');
+  legacy4._applyTaskDecision({ id: 'T1', title: 'x', scope: 'a.js', checks: [{ text: 'works' }] }, { state: 'REVISE', reason: 'scope added' });
+  assert.strictEqual(legacy4._taskGate(), 'active', 'moderation can supply the missing scope and checks');
 
   // The task gate is enforced in code, so exercise the transitions directly: no files, no agents, no network.
   const taskSession = (contract) => {
@@ -140,11 +153,13 @@ async function main() {
     taskGate: 'awaiting', currentTask: null, completedTasks: [], deferredTasks: [], ...over,
   });
   const T1 = { id: 'T1', title: 'first task', scope: 'a.js', checks: [{ text: 'works' }] };
-  let tc = baseContract({ taskGate: 'active', currentTask: { ...T1, attempts: 0, status: 'active' } });
+  // Approval needs a completed implement turn after the task's last change, so the unit fixtures carry both rounds.
+  const worked = { attempts: 0, status: 'active', workedRound: 2, changedRound: 1 };
+  let tc = baseContract({ taskGate: 'active', currentTask: { ...T1, ...worked } });
   let ts = taskSession(tc);
   ts._applyTaskDecision(null, { state: 'APPROVE', reason: '' });
   assert.strictEqual(tc.currentTask.id, 'T1', 'an APPROVE without a next block keeps the task open');
-  assert.strictEqual(tc.taskGate, 'active');
+  assert.strictEqual(tc.taskGate, 'awaiting', 'a malformed approval sends the gate back to moderation');
   assert.match(ts.log.join('\n'), /함께 있어야/, 'the moderator is told why the approval did not clear the task');
   ts._applyTaskDecision({ none: true }, { state: 'APPROVE', reason: '' });
   assert.strictEqual(tc.taskGate, 'closed', 'an APPROVE with Task: none closes the ledger');
@@ -166,12 +181,68 @@ async function main() {
   ts._applyTaskDecision(null, { state: 'APPROVE', reason: '' });
   assert.strictEqual(tc.currentTask, null);
   assert.strictEqual(tc.taskGate, 'awaiting', 'an APPROVE with no task block leaves the ledger waiting');
-  // An invalid next block never closes the task that is still open.
-  tc = baseContract({ taskGate: 'active', currentTask: { ...T1, attempts: 0, status: 'active' } });
+  // An invalid next block never closes the task that is still open, and it goes back to moderation.
+  tc = baseContract({ taskGate: 'active', currentTask: { ...T1, ...worked } });
   ts = taskSession(tc);
   ts._applyTaskDecision({ invalid: true, title: 'do everything' }, { state: 'APPROVE', reason: '' });
   assert.strictEqual(tc.currentTask.id, 'T1', 'an invalid block keeps the open task');
+  assert.strictEqual(tc.taskGate, 'awaiting', 'an invalid next block returns the gate to moderation');
+  // A blocked task is never approved, even with a valid next block or Task: none.
+  tc = baseContract({ taskGate: 'blocked', currentTask: { ...T1, attempts: 2, status: 'blocked', workedRound: 3, changedRound: 2 } });
+  ts = taskSession(tc);
+  ts._applyTaskDecision({ none: true }, { state: 'APPROVE', reason: '' });
+  assert.deepStrictEqual(tc.completedTasks, [], 'a blocked task is never approved');
+  assert.strictEqual(tc.currentTask.id, 'T1');
+  assert.strictEqual(tc.taskGate, 'blocked', 'rejecting the approval keeps the block');
+  assert.match(ts.log.join('\n'), /승인할 수 없습니다/);
+  // A task with no implement turn since its last change is not approved either.
+  tc = baseContract({ taskGate: 'active', currentTask: { ...T1, attempts: 0, status: 'revise', workedRound: 1, changedRound: 2 } });
+  ts = taskSession(tc);
+  ts._applyTaskDecision({ none: true }, { state: 'APPROVE', reason: '' });
+  assert.deepStrictEqual(tc.completedTasks, [], 'an unworked task is never approved');
+  assert.strictEqual(tc.taskGate, 'awaiting', 'the unworked task goes back to moderation');
+  assert.match(ts.log.join('\n'), /구현 턴 없이 승인할 수 없습니다/);
+  // An unchanged REVISE does not release a blocked task; only a split, a changed block or a validated ASSIGN does.
+  tc = baseContract({ taskGate: 'blocked', currentTask: { ...T1, attempts: 2, status: 'blocked' } });
+  ts = taskSession(tc);
+  ts._applyTaskDecision(null, { state: 'REVISE', reason: 'again' }, null);
+  assert.strictEqual(tc.currentTask.status, 'blocked', 'a repeated order keeps the task blocked');
+  assert.strictEqual(tc.taskGate, 'blocked');
+  // A validated ASSIGN on its own releases a blocked task — the moderator has decided who continues.
+  tc = baseContract({ taskGate: 'blocked', currentTask: { ...T1, attempts: 2, status: 'blocked', changedRound: 1 } });
+  ts = taskSession(tc);
+  ts._applyTaskDecision(null, null, 'claude');
+  assert.strictEqual(tc.currentTask.status, 'revise', 'a bare validated ASSIGN releases the block');
+  assert.strictEqual(tc.taskGate, 'active', 'the released task can take a write turn again');
+  assert.strictEqual(tc.currentTask.attempts, 0, 'the ASSIGN restarts the attempt counter');
+  assert.strictEqual(tc.currentTask.changedRound, 2, 'the ASSIGN counts as a change in this round');
+  assert.match(ts.log.join('\n'), /claude.*배정/, 'the release is reported to the owner');
+  // Deferred split work blocks Task: none until the moderator resumes it or drops it explicitly.
+  tc = baseContract({
+    taskGate: 'active', currentTask: { ...T1, ...worked },
+    deferredTasks: [{ id: 'T0', title: 'parent', scope: 'big.js', checks: [{ text: 'all' }], splitInto: ['T1'] }],
+  });
+  ts = taskSession(tc);
+  ts._applyTaskDecision({ none: true }, { state: 'APPROVE', reason: '' });
+  assert.deepStrictEqual(tc.completedTasks.map((t) => t.id), ['T1']);
+  assert.strictEqual(tc.taskGate, 'awaiting', 'a deferred parent blocks Task: none');
+  assert.match(ts.log.join('\n'), /닫을 수 없습니다/);
+  ts._applyTaskDecision({ none: true }, { state: 'APPROVE', reason: '' }, null, { id: 'T0', reason: 'out of scope' });
+  assert.deepStrictEqual(tc.deferredTasks, [], 'TASK_DROP resolves the deferred parent');
+  assert.deepStrictEqual(tc.droppedTasks.map((t) => t.id), ['T0']);
+  assert.strictEqual(tc.taskGate, 'closed', 'the ledger closes once the deferred parent is resolved');
+  // Naming a deferred parent again resumes it with its retained requirements.
+  tc = baseContract({ deferredTasks: [{ id: 'T1', title: 'parent', scope: 'big.js', checks: [{ text: 'all' }], splitInto: ['T1a'] }] });
+  ts = taskSession(tc);
+  ts._applyTaskDecision({ id: 'T1', title: 'parent', scope: 'big.js', checks: [{ text: 'all' }] }, null);
+  assert.strictEqual(tc.currentTask.id, 'T1', 'a deferred parent can be resumed');
+  assert.deepStrictEqual(tc.deferredTasks, [], 'resuming removes it from the deferred list');
   assert.strictEqual(tc.taskGate, 'active');
+  assert.deepStrictEqual(P.parseTaskDrop('TASK_DROP: T1 — out of scope'), { id: 'T1', reason: 'out of scope' });
+  assert.strictEqual(P.parseTaskDrop('nothing to drop'), null);
+  assert.strictEqual(P.validTask({ id: 'T1', title: 'x' }), false, 'a saved task without scope and checks is invalid');
+  assert.strictEqual(P.validTask({ id: 'T1', scope: 'a.js', checks: [{ text: ' ' }] }), false, 'an empty check is not a check');
+  assert.strictEqual(P.validTask(T1), true);
   tc = baseContract({ taskGate: 'active', currentTask: { ...T1, attempts: 1, status: 'revise' } });
   ts = taskSession(tc);
   ts._applyTaskDecision({ id: 'T1a', title: 'first half', scope: 'a.js', checks: [{ text: 'half works' }] }, { state: 'REVISE', reason: 'too big' });
@@ -635,6 +706,9 @@ async function main() {
     assert.ok(f, `missing prompt ${re}`);
     return fs.readFileSync(path.join(st.runDir, 'turns', f), 'utf8');
   };
+  // A round can hold two work orders (pre-build and post-review), so check the set, not an arbitrary file.
+  const trustPromptsOf = (st, re) => fs.readdirSync(path.join(st.runDir, 'turns')).filter((x) => re.test(x))
+    .map((f) => fs.readFileSync(path.join(st.runDir, 'turns', f), 'utf8'));
   process.env.COUNCIL_MOCK_FINDING = 'missing edge case X';
   id = await c.start({ projectDir: tempRepo('findings'), mode: 'develop', topic: 'carry findings', agents: four, moderator: 'claude', worker: 'deepseek', maxRounds: 8, planRounds: 1, testCmd: 'node --version' });
   s = await c.waitDone(id);
@@ -709,6 +783,9 @@ async function main() {
   assert.match(trustPromptOf(s, /-R4-claude-work-order\.prompt\.md$/), /Completed tasks[\s\S]*T1 ✓/, 'a resumed moderator sees the completed ledger');
   assert.ok(!fs.readdirSync(path.join(s.runDir, 'turns')).some((x) => /-R4-codex-implement\.prompt\.md$/.test(x)),
     'resuming a closed session writes nothing until the moderator names a task');
+  // The pre-build work order closed the ledger, so this round has no test of its own: the review must still carry the last evidence.
+  assert.match(trustPromptOf(s, /-R4-gemini-review\.prompt\.md$/), /## Latest test run \(`node --version`\)/,
+    'a review after the pre-build closure keeps the latest test evidence');
 
   // (c) REVISE keeps the same task and records the attempt; two revisions in a row mark it blocked
   process.env.COUNCIL_MOCK_REVISE_ROUNDS = '2,3';
@@ -717,7 +794,8 @@ async function main() {
   delete process.env.COUNCIL_MOCK_REVISE_ROUNDS;
   const t1 = s.contract.completedTasks.find((x) => x.id === 'T1');
   assert.ok(t1, JSON.stringify(s.contract.completedTasks));
-  assert.strictEqual(t1.attempts, 2, 'both revisions are recorded on the task that was finally approved');
+  assert.strictEqual(t1.revisions, 3, 'every revision (both REVISEs and the descope) is recorded on the approved task');
+  assert.strictEqual(t1.attempts, 0, 'a descope restarts the attempt counter that gates blocking');
   assert.strictEqual(s.contract.currentTask, null);
   const impl3r = trustPromptOf(s, /-R3-codex-implement\.prompt\.md$/);
   assert.match(impl3r, /Current task: T1 — mock task T1/, 'a revised task keeps its id');
@@ -725,10 +803,11 @@ async function main() {
   assert.match(trustPromptOf(s, /-R4-claude-work-order\.prompt\.md$/), /The worker is stuck on T1/, 'two revisions in a row are a blocked task');
   assert.match(sysText(s), /작은 작업 T1 수정 지시/);
   assert.match(sysText(s), /작은 작업 T1 막힘/);
-  // A blocked task goes to the moderator BEFORE a write turn: the first turn of the next round is a work order.
+  // A blocked task reaches the moderator BEFORE a write turn, is descoped, and is approved only after a fresh implement turn.
   const blockedR4 = s.messages.filter((m) => m.round === 4 && m.kind === 'agent' && m.ok).map((m) => m.phase);
-  assert.strictEqual(blockedR4[0], 'work-order', `a blocked task must reach the moderator first: ${blockedR4.join(', ')}`);
-  assert.ok(!blockedR4.includes('implement'), 'no implement turn runs while the gate is blocked and then closed');
+  assert.deepStrictEqual(blockedR4.slice(0, 2), ['work-order', 'implement'], `a blocked task is descoped before the write turn: ${blockedR4.join(', ')}`);
+  assert.match(sysText(s), /범위를 다시 잡았습니다/, 'the blocked task was released by a descope, not by an approval');
+  assert.ok(s.contract.completedTasks.some((x) => x.id === 'T1'), 'the descoped task is approved after its implement turn');
 
   // (d) a worker that reports itself blocked hands the task back to the moderator with what was tried
   process.env.COUNCIL_MOCK_BLOCKED = '1';
@@ -736,8 +815,13 @@ async function main() {
   s = await c.waitDone(id);
   delete process.env.COUNCIL_MOCK_BLOCKED;
   assert.match(sysText(s), /작은 작업 T1 막힘/);
-  assert.match(trustPromptOf(s, /-R2-claude-work-order\.prompt\.md$/), /The worker is stuck on T1: tried the mock fix does not satisfy/, 'the moderator sees what was tried');
-  assert.match(trustPromptOf(s, /-R2-claude-work-order\.prompt\.md$/), /remaining the mock test still fails/, 'the moderator sees what remains');
+  const blockedPrompts = trustPromptsOf(s, /-R2-claude-work-order\.prompt\.md$/);
+  assert.ok(blockedPrompts.some((p) => /The worker is stuck on T1: tried the mock fix does not satisfy/.test(p)), 'the moderator sees what was tried');
+  assert.ok(blockedPrompts.some((p) => /remaining the mock test still fails/.test(p)), 'the moderator sees what remains');
+  // A worker that reports BLOCKED every time is never approved: the moderator keeps descoping and the session ends honestly.
+  assert.deepStrictEqual(s.contract.completedTasks, [], 'a task the worker never finished is never approved');
+  assert.strictEqual(s.outcome, 'round_limit', sysText(s));
+  assert.match(sysText(s), /범위를 다시 잡았습니다/);
 
   // (e) unanimous AGREE cannot end the project while a task is still open
   process.env.COUNCIL_MOCK_TASKS = 'hold';
@@ -771,13 +855,17 @@ async function main() {
   assert.match(impl4split, /Deferred \(unfinished, split\) tasks[\s\S]*T1/, 'the split parent stays visible as unfinished');
   assert.ok(!/Completed tasks[\s\S]*T1 ✓/.test(impl4split), 'a deferred parent is never listed as completed');
   assert.match(sysText(s), /T1a\(으\)로 나눕니다/);
+  // Approving the child with Task: none is not enough while the parent's remaining work is still deferred.
+  assert.ok(s.contract.deferredTasks[0].scope && s.contract.deferredTasks[0].checks.length, 'the deferred parent keeps its remaining requirements');
+  assert.strictEqual(s.contract.taskGate, 'awaiting', 'the ledger cannot close while a deferred parent is unfinished');
+  assert.match(sysText(s), /보류한 작업 T1.*닫을 수 없습니다/);
+  assert.strictEqual(s.outcome, 'round_limit', sysText(s));
 
   // (i) descoping a blocked task clears "blocked" and the write turn comes after the moderator's re-scope
   process.env.COUNCIL_MOCK_REVISE_ROUNDS = '2,3';
-  process.env.COUNCIL_MOCK_DESCOPE_ROUNDS = '4';
   id = await c.start({ projectDir: tempRepo('taskdescope'), mode: 'develop', topic: 'task descope', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 5, planRounds: 1, testCmd: 'node --version' });
   s = await c.waitDone(id);
-  delete process.env.COUNCIL_MOCK_REVISE_ROUNDS; delete process.env.COUNCIL_MOCK_DESCOPE_ROUNDS;
+  delete process.env.COUNCIL_MOCK_REVISE_ROUNDS;
   const r4descope = s.messages.filter((m) => m.round === 4 && m.kind === 'agent' && m.ok).map((m) => m.phase);
   assert.deepStrictEqual(r4descope.slice(0, 2), ['work-order', 'implement'], `a blocked task is re-scoped before the write turn: ${r4descope.join(', ')}`);
   const impl4descope = trustPromptOf(s, /-R4-codex-implement\.prompt\.md$/);
@@ -809,15 +897,19 @@ async function main() {
   assert.ok(!phases(s).some((x) => x.endsWith(':implement')), `a malformed task block must not start work: ${phases(s).join(', ')}`);
   assert.match(sysText(s), /형식이 잘못/);
 
-  // (l) an APPROVE with no next block keeps the task open (the ledger cannot silently disappear)
+  // (l) an APPROVE with no next block keeps the task open and returns the gate to moderation (the ledger cannot disappear)
   process.env.COUNCIL_MOCK_NONEXT = '1';
-  id = await c.start({ projectDir: tempRepo('tasknonext'), mode: 'develop', topic: 'no next task', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 2, planRounds: 1, testCmd: 'node --version' });
+  id = await c.start({ projectDir: tempRepo('tasknonext'), mode: 'develop', topic: 'no next task', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 3, planRounds: 1, testCmd: 'node --version' });
   s = await c.waitDone(id);
   delete process.env.COUNCIL_MOCK_NONEXT;
   assert.deepStrictEqual(s.contract.completedTasks, [], 'an approval without a next block never completes the task');
   assert.strictEqual(s.contract.currentTask?.id, 'T1');
-  assert.strictEqual(s.contract.taskGate, 'active');
+  assert.strictEqual(s.contract.taskGate, 'awaiting', 'the malformed approval goes back to moderation');
   assert.match(sysText(s), /함께 있어야/);
+  // The next round starts with the moderator; no write turn happens on the back of a malformed approval.
+  const r3nonext = s.messages.filter((m) => m.round === 3 && m.kind === 'agent' && m.ok).map((m) => m.phase);
+  assert.strictEqual(r3nonext[0], 'work-order', `moderation comes first after a malformed approval: ${r3nonext.join(', ')}`);
+  assert.ok(!r3nonext.includes('implement'), 'no write turn follows a malformed approval');
 
   // (m) approving a task while restating it never renames it into a duplicate next task
   process.env.COUNCIL_MOCK_RESTATE_COMPLETED = '1';
@@ -840,8 +932,23 @@ async function main() {
   assert.strictEqual(s.contract.taskGate, 'awaiting');
   assert.ok(!phases(s).some((x) => x.endsWith(':implement')), `a malformed reply must not start work: ${phases(s).join(', ')}`);
   assert.match(sysText(s), /작업이 배정되지 않아/);
+
+  // (o) an explicitly dropped deferred parent is the other legal resolution: it is recorded with a reason and the ledger closes
+  process.env.COUNCIL_MOCK_REVISE_ROUNDS = '2';
+  process.env.COUNCIL_MOCK_SPLIT_ROUNDS = '3';
+  process.env.COUNCIL_MOCK_DROP = '1';
+  id = await c.start({ projectDir: tempRepo('taskdrop'), mode: 'develop', topic: 'task drop', agents: three, moderator: 'claude', worker: 'codex', maxRounds: 6, planRounds: 1, testCmd: 'node --version' });
+  s = await c.waitDone(id);
+  delete process.env.COUNCIL_MOCK_REVISE_ROUNDS; delete process.env.COUNCIL_MOCK_SPLIT_ROUNDS; delete process.env.COUNCIL_MOCK_DROP;
+  assert.deepStrictEqual(s.contract.completedTasks.map((x) => x.id), ['T1a'], JSON.stringify(s.contract.completedTasks));
+  assert.deepStrictEqual(s.contract.droppedTasks.map((x) => x.id), ['T1'], 'the dropped parent is recorded separately from completed work');
+  assert.ok(s.contract.droppedTasks[0].reason, 'the drop reason is recorded');
+  assert.deepStrictEqual(s.contract.deferredTasks, [], 'a dropped task no longer blocks closure');
+  assert.strictEqual(s.contract.taskGate, 'closed', 'the ledger closes after the deferred parent is dropped');
+  assert.match(sysText(s), /보류했던 작업 T1.*제외합니다/);
+  assert.strictEqual(s.outcome, 'agreed', sysText(s));
   console.log('✓ moderator-gated tasks: scope/checks in prompts, approve→next, revise, blocked, no AGREE with an open task, resume');
-  console.log('✓ task gate: no task → no write turn, invalid block rejected, approval needs a next block, split/descope, no reopen');
+  console.log('✓ task gate: no task → no write turn, invalid block rejected, approval needs a next block, split/descope/drop, no reopen');
 
 
   // 4. failure drills: Gemini hits a usage limit, Codex has a network blip while implementing

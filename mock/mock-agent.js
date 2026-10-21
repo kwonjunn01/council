@@ -73,22 +73,24 @@ process.stdin.on('data', (d) => { input += d; }).on('end', async () => {
     if (phase === 'plan-final') {
       say(`\n${bad ? 'Task: T1 — do everything\n' : block('T1')}`);
     } else {
-      const cur = (input.match(/^Current task: (T\d+)/m) || [])[1] || null;
+      const cur = (input.match(/^Current task: (T\d+[a-z]?)/m) || [])[1] || null;
+      const deferred = (input.match(/^Deferred \(unfinished, split\) tasks[\s\S]*?\n-\s*(T\d+[a-z]?)/m) || [])[1] || null;
       const baseId = cur || 'T1';
       const next = `T${(Number(String(cur || 'T0').replace(/\D/g, '')) || 0) + 1}`;
       const rounds = (env) => (process.env[env] || '').split(',').filter(Boolean).map(Number);
       const revise = rounds('COUNCIL_MOCK_REVISE_ROUNDS').includes(round);
       const split = rounds('COUNCIL_MOCK_SPLIT_ROUNDS').includes(round);
-      // A blocked task is descoped the way the moderator prompt tells it to: by default when the block came
-      // from failing tests (revision loops keep their attempts), or in a round the drill names with DESCOPE_ROUNDS.
+      // A stuck task is never approved: it is split or descoped so the worker gets a concrete, smaller order.
+      // The block itself is the signal, so the same round cannot descope twice (the second order would be unchanged).
       const stuckLine = /The worker is stuck on T\d+/.test(input);
-      const descope = /The worker is stuck on T\d+: tried 테스트가/.test(input)
-        || (stuckLine && rounds('COUNCIL_MOCK_DESCOPE_ROUNDS').includes(round));
+      const descope = stuckLine;
+      // A deferred split parent blocks Task: none until the moderator resolves it explicitly.
+      if (process.env.COUNCIL_MOCK_DROP === '1' && deferred) say(`\nTASK_DROP: ${deferred} — mock: excluded from this round\n`);
       say(`\nTASK_VERDICT: ${revise || split || descope ? `REVISE — mock: check ${baseId} is not met yet` : 'APPROVE'}\n`);
       if (bad) say('Task: T1 — do everything\n');
       else if (process.env.COUNCIL_MOCK_NONEXT === '1') { /* approval with no next block: the task must stay open */ }
       else if (process.env.COUNCIL_MOCK_RESTATE_COMPLETED === '1' && cur) say(block(cur));
-      else if (split) say(block(`${baseId}a`));
+      else if (split) say(block(`${cur || 'T1'}a`));
       else if (descope) say(`Task: ${baseId} — mock task ${baseId} (descoped)\nTask scope: mock/descoped-${baseId}.txt\nTask checks:\n- [ ] mock check ${baseId} descoped\n`);
       else if (revise) say(block(baseId));
       else if (taskMode !== 'hold' && round >= 3) say('Task: none\n');

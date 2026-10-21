@@ -774,7 +774,7 @@ function renderContract() {
   const words = (c.ownerWords || []).filter(Boolean);
   const acceptance = (c.acceptance || []).map((a) => (typeof a === 'string' ? { done: false, text: a } : a));
   const has = words.length || c.goal || acceptance.length || (c.assumptions || []).length || (c.openFindings || []).length
-    || c.currentTask || (c.completedTasks || []).length || (c.deferredTasks || []).length;
+    || c.currentTask || (c.completedTasks || []).length || (c.deferredTasks || []).length || (c.droppedTasks || []).length;
   box.hidden = !has;
   if (!has) return;
   const key = JSON.stringify(c);
@@ -786,10 +786,13 @@ function renderContract() {
   const task = c.currentTask || null;
   const doneTasks = c.completedTasks || [];
   const deferredTasks = c.deferredTasks || [];
+  const droppedTasks = c.droppedTasks || [];
   const gate = c.taskGate || (task ? (task.status === 'blocked' ? 'blocked' : 'active') : 'awaiting');
-  const gateLabel = gate === 'closed' ? '<span class="hint ok">모든 작업 완료</span>'
-    : gate === 'blocked' ? '<span class="bad">작업 막힘 — 모더레이터 판단 대기</span>'
-      : gate === 'awaiting' ? '<span class="muted">작업 배정 대기</span>' : '<span class="muted">작업 진행 중</span>';
+  // "모든 작업 완료" is only true when nothing unfinished is still deferred.
+  const gateLabel = gate === 'closed' && !deferredTasks.length ? '<span class="hint ok">모든 작업 완료</span>'
+    : deferredTasks.length ? '<span class="bad">보류한 작업이 남아 있음 — 다시 맡기거나 제외해야 합니다</span>'
+      : gate === 'blocked' ? '<span class="bad">작업 막힘 — 모더레이터 판단 대기</span>'
+        : gate === 'awaiting' ? '<span class="muted">작업 배정 대기</span>' : '<span class="muted">작업 진행 중</span>';
   const taskState = task && task.status === 'blocked' ? '<span class="bad">막힘 — 모더레이터 확인 대기</span>'
     : task && task.status === 'revise' ? '<span class="bad">수정 지시 — 같은 작업을 이어서</span>' : '';
   $('#contractBody').innerHTML = `
@@ -805,7 +808,8 @@ function renderContract() {
       ${task.status === 'revise' && task.note ? `<div class="muted">사유: ${esc(task.note)}</div>` : ''}
       ${task.splitFrom ? `<div class="muted">${esc(task.splitFrom)}에서 나눈 작업</div>` : ''}
       ${task.attempts ? `<div class="muted">시도 ${task.attempts + 1}회</div>` : ''}</div>` : ''}
-    ${deferredTasks.length ? `<div class="cline"><b>보류한 작업 ${deferredTasks.length}</b><ul class="muted">${deferredTasks.map((t) => `<li>${esc(t.id)} — ${esc(t.title)} <span class="muted">(미완료)</span></li>`).join('')}</ul></div>` : ''}
+    ${deferredTasks.length ? `<div class="cline"><b>보류한 작업 ${deferredTasks.length}</b><ul class="muted">${deferredTasks.map((t) => `<li>${esc(t.id)} — ${esc(t.title)} <span class="muted">(미완료${t.splitInto?.length ? `, ${esc(t.splitInto.join(', '))}(으)로 나눔` : ''})</span></li>`).join('')}</ul></div>` : ''}
+    ${droppedTasks.length ? `<div class="cline"><b>제외한 작업 ${droppedTasks.length}</b><ul class="muted">${droppedTasks.map((t) => `<li>${esc(t.id)} — ${esc(t.title)} <span class="muted">제외: ${esc(t.reason || '사유 없음')}</span></li>`).join('')}</ul></div>` : ''}
     ${doneTasks.length ? `<div class="cline"><b>완료한 작은 작업 ${doneTasks.length}</b><ul>${doneTasks.map((t) => `<li>✓ ${esc(t.id)} ${esc(t.title)}${t.sha ? ` <code>${esc(String(t.sha).slice(0, 8))}</code>` : ''}${t.round ? ` <span class="muted">R${t.round}</span>` : ''}</li>`).join('')}</ul></div>` : ''}
     ${(c.openFindings || []).length ? `<div class="cline"><b>열린 지적 ${c.openFindings.length}</b><ul class="ofind">${c.openFindings.map((f) => `<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
     ${c.needsRevision ? '<div class="crev">⚠ 새로 남긴 말이 아직 계약에 반영되지 않았습니다 — 다음 정리에서 갱신됩니다.</div>' : ''}`;
