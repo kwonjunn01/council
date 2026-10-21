@@ -53,7 +53,7 @@ function createServer({ mock = false } = {}) {
     config: () => ({
       version: pkg.version, language: config.language, discussionLanguage: config.discussionLanguage, mock, platform: process.platform,
       agents: Object.fromEntries(Object.entries(config.agents).map(([id, a]) =>
-        [id, { label: a.label, color: a.color, role: a.role, enabled: a.enabled !== false, executor: !!a.executor, cmd: a.cmd, model: a.model || '', hasModel: !!a.modelArgs, hasEffort: !!a.effortArgs, effort: a.effort || '', setup: a.setup || null }])),
+        [id, { label: a.label, color: a.color, role: a.role, labRole: a.labRole || a.role, enabled: a.enabled !== false, executor: !!a.executor, cmd: a.cmd, model: a.model || '', hasModel: !!a.modelArgs, hasEffort: !!a.effortArgs, effort: a.effort || '', setup: a.setup || null }])),
     }),
     check: async () => Object.fromEntries(await Promise.all(Object.entries(config.agents).map(async ([id, a]) => {
       const r = await checkAgent(a);

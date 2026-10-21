@@ -207,6 +207,23 @@ async function main() {
   assert.ok(s.round > 2, 'injecting into a finished session should continue it');
   console.log(`✓ debate + continue (round ${s.round})`);
 
+  // 2b. research lab: lab personas and prompts (warrants, claim ledger); the owner still gets Korean, members talk in English
+  id = await c.start({ projectDir: tempRepo('lab'), team: 'lab', mode: 'debate', topic: 'Does label smoothing help calibration?', agents: three, moderator: 'claude', maxRounds: 1 });
+  s = await c.waitDone(id);
+  assert.strictEqual(s.team, 'lab');
+  assert.match(s.roles.codex, /엄밀성/);
+  const turns = path.join(s.runDir, 'turns');
+  const promptOf = (re) => fs.readFileSync(path.join(turns, fs.readdirSync(turns).find((f) => re.test(f))), 'utf8');
+  const opening = promptOf(/codex-opening\.prompt/);
+  assert.match(opening, /top-tier research lab/);
+  assert.match(opening, /\[CITED: authors, year/);
+  assert.match(opening, /Write to the other members in English/);
+  const brief = promptOf(/claude-brief\.prompt/);
+  assert.match(brief, /Claim ledger/);
+  assert.match(brief, /write all of it in Korean/);
+  assert.match(sysText(s), /🔬 연구실/);
+  console.log('✓ research lab: personas, warrants, claim ledger, language split');
+
   // 3. concurrency: two folders at once; same folder twice is refused
   const a = tempRepo('a'), b = tempRepo('b');
   const idA = await c.start({ projectDir: a, mode: 'debate', topic: 'a', agents: ['claude', 'codex'], maxRounds: 2 });

@@ -69,6 +69,11 @@ legend { color: var(--muted); font-size: 12.5px; padding: 0 4px; }
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-top: 12px; }
 .seg button { border: 0; border-radius: 0; background: transparent; padding: 9px; }
 .seg button.on { background: var(--accent); color: #fff; font-weight: 600; }
+.seg.two { grid-template-columns: 1fr 1fr; }
+.seg.two button { padding: 11px; font-size: 15px; }
+.flow { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: var(--muted); font-size: 12.5px; }
+.seg.mini { display: inline-grid; grid-template-columns: repeat(3, auto); margin-top: 0; }
+.seg.mini button { padding: 4px 11px; font-size: 12.5px; }
 #setup.debate .dev-only { display: none; }
 
 .agent { border-top: 1px solid var(--line); padding: 8px 0 6px; }

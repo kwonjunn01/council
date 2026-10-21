@@ -7,13 +7,22 @@ const PHASE = {
 };
 const STATUS = { created: '준비', running: '진행 중', paused: '일시정지', done: '완료', stopped: '중단됨', error: '오류', interrupted: '중단됨(앱 종료)' };
 const DEFAULT_ROLES = { moderator: 'claude', worker: 'deepseek' };
+const TEAM_HINT = {
+  product: '🛠 기술·쓸모·디자인·매력을 따지는 제품 전문가 팀입니다.',
+  lab: '🔬 레퍼런스·수식·데이터로 공격하고 방어하며, 주장 원장(C1, C2…)이 확립·반박·결정적 실험으로 수렴할 때까지 토론하는 탑티어 연구실입니다. 실험이 필요하면 연구 계획 → 실험 구현 → 리뷰를 반복하고, 최종 보고는 논문 형식입니다.',
+};
+const TEAM_LABEL = { product: '🛠 제품팀', lab: '🔬 연구실' };
+const TOPIC_HINT = {
+  product: '던지고 싶은 화두를 편하게 적으세요.\n예) 이 저장소에 실시간 협업 편집을 넣고 싶어. 어떻게 하는 게 제일 좋을까?\n(GitHub 이슈를 지정하면 비워둬도 됩니다)',
+  lab: '연구 질문이나 가설을 적으세요.\n예) 1B 미만 모델로 한국어 질의 영상 장면 검색을 할 때, 듀얼 인코더와 캡션+텍스트 임베딩 중 어느 쪽이 Recall@5에서 나을까?\n관련 논문·데이터·제약이 있으면 함께 적어 주세요.',
+};
 const MODE_HINT = {
   auto: '화두만 던지세요. 세 모델이 토론하고, 합의 후 코드 작업이 필요하다고 판단되면 알아서 계획 → 구현(워커) → 리뷰를 반복합니다. 꼭 필요한 것만 나에게 질문합니다.',
   debate: '선택한 모델들이 토론합니다. 모더레이터가 입장을 내고 → 나머지가 이름을 불러 반박 → 모더레이터가 쟁점·다음 질문 정리. 투표한 전원이 AGREE면 합의.',
   develop: '① 워커를 뺀 나머지가 블라인드 계획 → 계획 토론 → PLAN.md 확정  ② 워커가 구현 → git 체크포인트 → 테스트 → 리뷰어 비판 → 모더레이터 작업 지시 → 반복. 워커가 막히면 다른 모델이 대신 구현.',
 };
 
-let CFG = null, SESSIONS = [], SEL = null, RUN = null, CHECK = {}, PROBE = {}, MODE = 'auto', REPLY_TO = null;
+let CFG = null, SESSIONS = [], SEL = null, RUN = null, CHECK = {}, PROBE = {}, MODE = 'auto', TEAM = 'product', REPLY_TO = null;
 const MODELS = {};
 const EFFORT_KO = { low: '낮음', medium: '보통', high: '높음', xhigh: '매우 높음', max: '최대', ultra: '울트라', minimal: '최소' };
 const live = new Map();
@@ -114,7 +123,7 @@ function renderSessions() {
     const dot = s.waitingUntil ? 'waiting' : s.status;
     return `<button class="sitem ${s.id === SEL ? 'sel' : ''}" data-id="${esc(s.id)}" title="${esc(s.projectDir)}">
       <div class="t"><span class="dot ${dot}"></span><span>${esc(s.topic || '(제목 없음)')}</span></div>
-      <div class="s">${esc(base(s.projectDir))} · ${MODE_LABEL[s.mode] || s.mode} · R${s.round || 0} · ${esc(STATUS[s.status] || s.status)} · ${ago(s.updatedAt || s.startedAt)}</div></button>`;
+      <div class="s">${s.team === 'lab' ? '🔬 ' : ''}${esc(base(s.projectDir))} · ${MODE_LABEL[s.mode] || s.mode} · R${s.round || 0} · ${esc(STATUS[s.status] || s.status)} · ${ago(s.updatedAt || s.startedAt)}</div></button>`;
   };
   box.innerHTML = (act.length ? `<div class="sgroup">실행 중 ${act.length}</div>${act.map(item).join('')}` : '')
     + (rest.length ? `<div class="sgroup">기록</div>${rest.map(item).join('')}` : '')
@@ -155,8 +164,15 @@ async function select(id) {
 function renderAgents() {
   const box = $('#agentsBox');
   const saved = load('agents.' + MODE) || {};
-  // Before rolesV 2 every persona was saved, defaults included; drop those so new defaults show.
-  if (load('rolesV') !== 2) for (const a of Object.values(saved)) if (a) delete a.role;
+  // Before rolesV 2 every persona was saved, defaults included; rolesV 2 kept edited ones per mode; now they live per team.
+  const rolesV = load('rolesV');
+  if (rolesV === 2) {
+    const roles = load('roles.product') || {};
+    for (const [id, a] of Object.entries(saved)) if (a?.role && a.role !== CFG.agents[id]?.role) roles[id] ??= a.role;
+    save('roles.product', roles);
+  }
+  if (rolesV !== 3) { for (const a of Object.values(saved)) if (a) delete a.role; save('rolesV', 3); }
+  const roles = load('roles.' + TEAM) || {};
   box.innerHTML = '';
   for (const [id, a] of Object.entries(CFG.agents)) {
     const st = CHECK[id];
@@ -173,7 +189,7 @@ function renderAgents() {
         <select data-model="${id}" ${a.hasModel ? '' : 'disabled'} title="모델"></select>
         <select data-effort="${id}" title="생각 깊이 (effort)"></select>
         <input class="custom" data-custom="${id}" placeholder="모델 이름 직접 입력" hidden>
-        <textarea rows="2" data-role="${id}" placeholder="페르소나">${esc(saved[id]?.role || a.role)}</textarea>
+        <textarea rows="2" data-role="${id}" placeholder="페르소나">${esc(roles[id] || defaultRole(id))}</textarea>
       </div>`;
     box.appendChild(el);
   }
@@ -267,10 +283,18 @@ function setMode(m) {
   MODE = m;
   document.querySelectorAll('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
   $('#setup').className = m;
-  $('#modeHint').textContent = MODE_HINT[m];
+  $('#modeHint').textContent = `${TEAM_HINT[TEAM]}\n${MODE_HINT[m]}`;
+  $('#topic').placeholder = TOPIC_HINT[TEAM];
   save('mode', m);
   if (CFG) renderAgents(); // each mode remembers its own line-up
 }
+function setTeam(t) {
+  TEAM = t === 'lab' ? 'lab' : 'product';
+  document.querySelectorAll('#teamSeg button').forEach((b) => b.classList.toggle('on', b.dataset.team === TEAM));
+  save('team', TEAM);
+  setMode(MODE); // refreshes the hint and the personas of this team
+}
+const defaultRole = (id) => (TEAM === 'lab' ? CFG.agents[id].labRole : CFG.agents[id].role) || '';
 
 const FIELDS = ['projectDir', 'repo', 'topic', 'maxRounds', 'planRounds', 'language', 'discussionLanguage', 'testCmd', 'issue'];
 const CHECKS = ['relentless', 'blindOpening', 'branch', 'publish'];
@@ -289,17 +313,20 @@ function saveForm() {
   for (const c of CHECKS) save(c, $('#' + c).checked);
   save(`moderator.${MODE}`, $('#moderator').value);
   if (MODE === 'develop') save('worker.develop', $('#worker').value);
-  // Keep a persona only when the user edited it, so changes to the default persona still reach them.
+  // Keep a persona only when the user edited it (per team), so changes to the default persona still reach them.
   const ag = formAgents();
-  for (const [id, a] of Object.entries(ag)) if (a.role === CFG.agents[id]?.role) delete a.role;
+  const roles = {};
+  for (const [id, a] of Object.entries(ag)) { if (a.role !== defaultRole(id)) roles[id] = a.role; delete a.role; }
   save('agents.' + MODE, ag);
-  save('rolesV', 2);
+  save('roles.' + TEAM, roles);
 }
 function restoreForm() {
   for (const f of FIELDS) { const v = load(f); if (v != null) $('#' + f).value = v; }
   for (const c of CHECKS) if (load(c) != null) $('#' + c).checked = load(c);
   if (CFG.language && !load('language')) $('#language').value = CFG.language;
   if (CFG.discussionLanguage && !load('discussionLanguage')) $('#discussionLanguage').value = CFG.discussionLanguage;
+  TEAM = load('team') === 'lab' ? 'lab' : 'product';
+  document.querySelectorAll('#teamSeg button').forEach((b) => b.classList.toggle('on', b.dataset.team === TEAM));
   setMode(load('mode') || 'auto');
 }
 
@@ -315,7 +342,7 @@ async function start(e) {
   if ($('#repo').value.trim()) { $('#repoStatus').className = 'hint'; $('#repoStatus').textContent = '저장소 준비 중(복제·연결)…'; }
   try {
     const { id } = await api('start', {
-      projectDir: $('#projectDir').value, repo: $('#repo').value, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles, models, efforts,
+      projectDir: $('#projectDir').value, repo: $('#repo').value, team: TEAM, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles, models, efforts,
       moderator: $('#moderator').value, worker: $('#worker').value,
       maxRounds: $('#maxRounds').value, planRounds: $('#planRounds').value, language: $('#language').value, discussionLanguage: $('#discussionLanguage').value,
       testCmd: $('#testCmd').value, relentless: $('#relentless').checked, blindOpening: $('#blindOpening').checked,
@@ -648,6 +675,7 @@ function renderRun() {
     return `<span style="color:${agentColor(a)}">● ${esc(agentLabel(a))}${roleOf(a, r) ? ` (${esc(roleOf(a, r))})` : ''}${cool ? ` ⏳${hhmm(cool)}` : ''}</span>`;
   };
   $('#runMeta').innerHTML = [
+    `<span>${TEAM_LABEL[r.team] || TEAM_LABEL.product}</span>`,
     `<span>${STATUS[r.status] || r.status} · R${r.round}${r.maxRounds ? '/' + r.maxRounds : ' (무제한)'} · ${r.mode === 'develop' ? '🛠' : '💬'} ${stage}</span>`,
     `<span title="${esc(r.projectDir)}">📁 ${esc(base(r.projectDir))}</span>`,
     r.branch ? `<span>🌿 ${esc(r.branch)} ← ${esc(r.baseBranch)}</span>` : '',
@@ -779,6 +807,7 @@ async function init() {
     $('#pickDir').onclick = async () => { const d = await window.councilDesktop.pickDir(); if (d) { $('#projectDir').value = d; saveForm(); checkGithub(); } };
   }
   document.querySelectorAll('#modeSeg button').forEach((b) => { b.onclick = () => setMode(b.dataset.mode); });
+  document.querySelectorAll('#teamSeg button').forEach((b) => { b.onclick = () => setTeam(b.dataset.team); });
   ['#moderator', '#worker', ...FIELDS.map((f) => '#' + f), ...CHECKS.map((c) => '#' + c)].forEach((s) => $(s).addEventListener('change', saveForm));
   $('#projectDir').addEventListener('change', checkGithub);
   $('#repo').addEventListener('change', checkGithub);
