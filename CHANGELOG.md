@@ -3,6 +3,8 @@
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) · 버전: [SemVer](https://semver.org/lang/ko/)
 
 ## [Unreleased]
+### Fixed
+- API 키가 없는 에이전트(DeepSeek 등)가 3분 시간 제한까지 기다리던 문제: 바로 "API 키 필요"로 알리고 제외
 
 ## [0.5.2] - 2026-10-19
 ### Added
