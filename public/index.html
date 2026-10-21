@@ -72,7 +72,10 @@
             <div class="grid3">
               <label>최대 라운드 <small>0=무제한</small><input id="maxRounds" type="number" min="0" value="6"></label>
               <label class="dev-only">계획 라운드<input id="planRounds" type="number" min="1" value="3"></label>
-              <label>응답 언어<input id="language" value="Korean"></label>
+            </div>
+            <div class="grid2">
+              <label>토론 언어 <small>(에이전트끼리)</small><input id="discussionLanguage" value="English"></label>
+              <label>나에게 말할 언어 <small>(질문·정리·보고)</small><input id="language" value="Korean"></label>
             </div>
             <label class="dev-only">테스트 명령 <small>(비워두면 계획에서 자동으로 찾음)</small>
               <input id="testCmd" placeholder="npm test · pytest -q · cargo test">

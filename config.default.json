@@ -1,6 +1,7 @@
 {
   "port": 4517,
   "language": "Korean",
+  "discussionLanguage": "English",
   "turnTimeoutSec": 1800,
   "testTimeoutSec": 600,
   "contextBudgetChars": 60000,

@@ -3,6 +3,8 @@
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) · 버전: [SemVer](https://semver.org/lang/ko/)
 
 ## [Unreleased]
+### Changed
+- 토론 언어와 나에게 말할 언어를 분리: 에이전트끼리는 영어(토큰 절약·추론 품질), 질문·라운드 정리·최종 보고는 한국어. 새 세션 화면에서 각각 고를 수 있음
 ### Fixed
 - API 키가 없는 에이전트(DeepSeek 등)가 3분 시간 제한까지 기다리던 문제: 바로 "API 키 필요"로 알리고 제외
 

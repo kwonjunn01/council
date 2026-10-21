@@ -272,7 +272,7 @@ function setMode(m) {
   if (CFG) renderAgents(); // each mode remembers its own line-up
 }
 
-const FIELDS = ['projectDir', 'repo', 'topic', 'maxRounds', 'planRounds', 'language', 'testCmd', 'issue'];
+const FIELDS = ['projectDir', 'repo', 'topic', 'maxRounds', 'planRounds', 'language', 'discussionLanguage', 'testCmd', 'issue'];
 const CHECKS = ['relentless', 'blindOpening', 'branch', 'publish'];
 function formAgents() {
   const out = {};
@@ -299,6 +299,7 @@ function restoreForm() {
   for (const f of FIELDS) { const v = load(f); if (v != null) $('#' + f).value = v; }
   for (const c of CHECKS) if (load(c) != null) $('#' + c).checked = load(c);
   if (CFG.language && !load('language')) $('#language').value = CFG.language;
+  if (CFG.discussionLanguage && !load('discussionLanguage')) $('#discussionLanguage').value = CFG.discussionLanguage;
   setMode(load('mode') || 'auto');
 }
 
@@ -316,7 +317,7 @@ async function start(e) {
     const { id } = await api('start', {
       projectDir: $('#projectDir').value, repo: $('#repo').value, mode: MODE, topic: $('#topic').value, agents: selectedAgents(), roles, models, efforts,
       moderator: $('#moderator').value, worker: $('#worker').value,
-      maxRounds: $('#maxRounds').value, planRounds: $('#planRounds').value, language: $('#language').value,
+      maxRounds: $('#maxRounds').value, planRounds: $('#planRounds').value, language: $('#language').value, discussionLanguage: $('#discussionLanguage').value,
       testCmd: $('#testCmd').value, relentless: $('#relentless').checked, blindOpening: $('#blindOpening').checked,
       issue: $('#issue').value, branch: $('#branch').checked, publish: $('#publish').checked,
     });

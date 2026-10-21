@@ -51,7 +51,7 @@ function createServer({ mock = false } = {}) {
   const session = (b) => council.get(String(b.runId || ''));
   const api = {
     config: () => ({
-      version: pkg.version, language: config.language, mock, platform: process.platform,
+      version: pkg.version, language: config.language, discussionLanguage: config.discussionLanguage, mock, platform: process.platform,
       agents: Object.fromEntries(Object.entries(config.agents).map(([id, a]) =>
         [id, { label: a.label, color: a.color, role: a.role, enabled: a.enabled !== false, executor: !!a.executor, cmd: a.cmd, model: a.model || '', hasModel: !!a.modelArgs, hasEffort: !!a.effortArgs, effort: a.effort || '', setup: a.setup || null }])),
     }),
